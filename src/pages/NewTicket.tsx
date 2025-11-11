@@ -1,0 +1,1198 @@
+// src/pages/NewTicket.tsx - Wizard multi-etapas
+import React, { useState } from 'react';
+import { Search, CheckCircle, Loader2, Building2, AlertCircle, Wrench, Plus, ArrowLeft, Mail, Phone, User } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
+import { supabase } from '../services/supabaseClient';
+import type { TicketFormData, Page, Company, Equipment } from '../types';
+import { Input } from '../components/ui/Input';
+import { Textarea } from '../components/ui/Textarea';
+import { Select } from '../components/ui/Select';
+import { Button } from '../components/ui/Button';
+import { FormSection } from '../components/FormSection';
+
+interface NewTicketPageProps {
+    setPage: (page: Page) => void;
+}
+
+type WizardStep = 'cnpj-search' | 'equipment-selection' | 'ticket-form';
+
+export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage }) => {
+    const { profile } = useAuth();
+
+    // Controle das etapas do wizard
+    const [currentStep, setCurrentStep] = useState<WizardStep>('cnpj-search');
+
+    // Dados da empresa selecionada
+    const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+
+    // Dados do equipamento selecionado/cadastrado
+    const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
+
+    // Estado para busca de CNPJ (Etapa 1)
+    const [cnpj, setCNPJ] = useState('');
+    const [cnpjLoading, setCNPJLoading] = useState(false);
+    const [cnpjError, setCNPJError] = useState<string | null>(null);
+
+    // Estado para equipamentos (Etapa 2)
+    const [equipments, setEquipments] = useState<Equipment[]>([]);
+    const [equipmentsLoading, setEquipmentsLoading] = useState(false);
+    const [showNewEquipmentForm, setShowNewEquipmentForm] = useState(false);
+    const [newEquipment, setNewEquipment] = useState({
+        manufacturer: '',
+        model: '',
+        serial_number: '',
+        installation_location: '',
+        internal_location: '',
+        application_type: '' as 'Acesso' | 'Ponto' | '',
+        tecnology: '',
+        cep: ''
+    });
+    const [equipmentCepLoading, setEquipmentCepLoading] = useState(false);
+
+    // Estado do formulário de chamado (Etapa 3)
+    const [formData, setFormData] = useState<TicketFormData>({
+        manufacturer: '',
+        model: '',
+        application_type: '',
+        problem_description: '',
+        card_type: '',
+        previous_procedures: '',
+        address_cep: '',
+        full_address: '',
+        internal_location: '',
+        integration_needed: false,
+        integration_requirements: '',
+        contact_name: profile?.full_name || '',
+        contact_email: profile?.email || '',
+        contact_phone: '',
+        company_cnpj: ''
+    });
+
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [cepLoading, setCepLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    // Estado para endereço de atendimento
+    const [useCompanyAddress, setUseCompanyAddress] = useState<boolean | null>(null);
+
+    // ==================== ETAPA 1: BUSCA DE CNPJ ====================
+
+    const formatCNPJ = (value: string) => {
+        const numbers = value.replace(/\D/g, '');
+        const limited = numbers.slice(0, 14);
+
+        if (limited.length <= 2) return limited;
+        if (limited.length <= 5) return `${limited.slice(0, 2)}.${limited.slice(2)}`;
+        if (limited.length <= 8) return `${limited.slice(0, 2)}.${limited.slice(2, 5)}.${limited.slice(5)}`;
+        if (limited.length <= 12) return `${limited.slice(0, 2)}.${limited.slice(2, 5)}.${limited.slice(5, 8)}/${limited.slice(8)}`;
+        return `${limited.slice(0, 2)}.${limited.slice(2, 5)}.${limited.slice(5, 8)}/${limited.slice(8, 12)}-${limited.slice(12)}`;
+    };
+
+    const handleCNPJChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const formatted = formatCNPJ(e.target.value);
+        setCNPJ(formatted);
+        setCNPJError(null);
+    };
+
+    const validateCNPJ = (cnpj: string): boolean => {
+        const numbers = cnpj.replace(/\D/g, '');
+        return numbers.length === 14;
+    };
+
+    const handleCNPJSearch = async () => {
+        if (!validateCNPJ(cnpj)) {
+            setCNPJError('CNPJ inválido. Deve conter 14 dígitos.');
+            return;
+        }
+
+        setCNPJLoading(true);
+        setCNPJError(null);
+
+        const cleanCNPJ = cnpj.replace(/\D/g, '');
+        console.log('🔍 Buscando CNPJ:', cleanCNPJ);
+
+        // Busca TODAS as empresas (porque CNPJs podem estar formatados de formas diferentes no banco)
+        const { data: allCompanies, error } = await supabase
+            .from('companies')
+            .select('*');
+
+        setCNPJLoading(false);
+
+        if (error) {
+            console.error('❌ Erro ao buscar empresas:', error);
+            setCNPJError(`Erro na busca: ${error.message}`);
+            return;
+        }
+
+        // Filtra localmente removendo a formatação para comparação exata
+        const foundCompany = allCompanies?.find(company => {
+            const dbCNPJ = company.cnpj.replace(/\D/g, '');
+            console.log('🔎 Comparando:', dbCNPJ, '===', cleanCNPJ);
+            return dbCNPJ === cleanCNPJ;
+        });
+
+        if (!foundCompany) {
+            console.log('❌ CNPJ não encontrado. Total de empresas:', allCompanies?.length);
+            setCNPJError('CNPJ não encontrado no sistema.');
+            return;
+        }
+
+        console.log('✅ Empresa encontrada:', foundCompany);
+        setSelectedCompany(foundCompany);
+        setCNPJError(null);
+    };
+
+    const handleCNPJConfirm = async () => {
+        if (!selectedCompany) return;
+
+        // Buscar equipamentos da empresa
+        setEquipmentsLoading(true);
+
+        console.log('🔍 Buscando equipamentos para company_id:', selectedCompany.id);
+        console.log('📋 Empresas do usuário:', {
+            principal: profile?.company_id,
+            adicionais: profile?.additional_company_ids
+        });
+
+        const { data, error } = await supabase
+            .from('equipments')
+            .select('*')
+            .eq('company_id', selectedCompany.id)
+            .order('created_at', { ascending: false });
+
+        setEquipmentsLoading(false);
+
+        if (error) {
+            console.error('❌ Erro ao buscar equipamentos:', error);
+        } else {
+            console.log('✅ Equipamentos encontrados:', data?.length || 0);
+            setEquipments(data || []);
+        }
+
+        setCurrentStep('equipment-selection');
+    };
+
+    // ==================== ETAPA 2: SELEÇÃO/CADASTRO DE EQUIPAMENTO ====================
+
+    const handleEquipmentSelect = (equipment: Equipment) => {
+        console.log('🔧 Equipamento selecionado:', equipment);
+        setSelectedEquipment(equipment);
+        setFormData(prev => ({
+            ...prev,
+            manufacturer: equipment.manufacturer,
+            model: equipment.model,
+            internal_location: equipment.internal_location || '',
+            application_type: equipment.application_type || '', // Preenche com o tipo do equipamento
+            card_type: (equipment.tecnology || '') as TicketFormData['card_type'], // Preenche com a tecnologia do equipamento
+            company_cnpj: cnpj
+        }));
+        setCurrentStep('ticket-form');
+    };
+
+    const handleNewEquipmentChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+        const { name, value } = e.target;
+        setNewEquipment(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleCreateEquipment = async () => {
+        if (!newEquipment.manufacturer || !newEquipment.model) {
+            setError('Fabricante e Modelo são obrigatórios.');
+            return;
+        }
+
+        if (!selectedCompany) return;
+
+        setEquipmentsLoading(true);
+        const { data, error: insertError } = await supabase
+            .from('equipments')
+            .insert([{
+                company_id: selectedCompany.id,
+                manufacturer: newEquipment.manufacturer,
+                model: newEquipment.model,
+                serial_number: newEquipment.serial_number || null,
+                internal_location: newEquipment.internal_location || newEquipment.installation_location || null,
+                application_type: newEquipment.application_type || null,
+                tecnology: newEquipment.tecnology || null
+            }])
+            .select()
+            .single();
+
+        setEquipmentsLoading(false);
+
+        if (insertError) {
+            setError(`Erro ao cadastrar equipamento: ${insertError.message}`);
+            return;
+        }
+
+        // Adiciona o novo equipamento à lista e seleciona
+        const newEquipmentData = data as Equipment;
+        setEquipments(prev => [newEquipmentData, ...prev]);
+        setSelectedEquipment(newEquipmentData);
+        setShowNewEquipmentForm(false);
+
+        setFormData(prev => ({
+            ...prev,
+            manufacturer: newEquipmentData.manufacturer,
+            model: newEquipmentData.model,
+            internal_location: newEquipmentData.internal_location || '',
+            company_cnpj: cnpj
+        }));
+
+        setCurrentStep('ticket-form');
+    };
+
+    // ==================== ETAPA 3: FORMULÁRIO DE CHAMADO ====================
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+        const { name, value, type } = e.target;
+        let finalValue: string | boolean = value;
+        if (type === 'checkbox') {
+            finalValue = (e.target as HTMLInputElement).checked;
+        }
+        setFormData(prev => ({ ...prev, [name]: finalValue }));
+    };
+
+    const handleCepSearch = async () => {
+        const cep = formData.address_cep.replace(/\D/g, '');
+
+        if (cep.length !== 8) {
+            setError("CEP inválido. Deve conter 8 números.");
+            return;
+        }
+
+        setCepLoading(true);
+        setError(null);
+
+        try {
+            const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+            if (!response.ok) {
+                throw new Error('Erro ao buscar CEP. Verifique a rede.');
+            }
+            const data = await response.json();
+            if (data.erro) {
+                throw new Error('CEP não encontrado.');
+            }
+
+            setFormData(prev => ({
+                ...prev,
+                full_address: `${data.logradouro}, ${data.bairro}, ${data.localidade} - ${data.uf}`
+            }));
+
+        } catch (err: unknown) {
+            console.error("Erro ao buscar CEP:", err);
+            setError(err instanceof Error ? err.message : "Não foi possível buscar o CEP.");
+            setFormData(prev => ({ ...prev, full_address: '' }));
+        } finally {
+            setCepLoading(false);
+        }
+    };
+
+    const handleEquipmentCepSearch = async () => {
+        const cep = newEquipment.cep.replace(/\D/g, '');
+
+        if (cep.length !== 8) {
+            setError("CEP inválido. Deve conter 8 números.");
+            return;
+        }
+
+        setEquipmentCepLoading(true);
+        setError(null);
+
+        try {
+            const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+            if (!response.ok) {
+                throw new Error('Erro ao buscar CEP. Verifique a rede.');
+            }
+            const data = await response.json();
+            if (data.erro) {
+                throw new Error('CEP não encontrado.');
+            }
+
+            setNewEquipment(prev => ({
+                ...prev,
+                installation_location: `${data.logradouro}, ${data.bairro}, ${data.localidade} - ${data.uf}`
+            }));
+
+        } catch (err: unknown) {
+            console.error("Erro ao buscar CEP:", err);
+            setError(err instanceof Error ? err.message : "Não foi possível buscar o CEP.");
+            setNewEquipment(prev => ({ ...prev, installation_location: '' }));
+        } finally {
+            setEquipmentCepLoading(false);
+        }
+    };
+
+    const validateForm = (): boolean => {
+        if (!formData.manufacturer || !formData.model) {
+            setError('Fabricante e Modelo são obrigatórios.'); return false;
+        }
+        if (formData.problem_description.length < 30) {
+            setError('Descrição do problema deve ter no mínimo 30 caracteres.'); return false;
+        }
+        if (!formData.full_address) {
+            setError('Endereço completo é obrigatório (use a busca por CEP).'); return false;
+        }
+        if (!formData.contact_name || !formData.contact_email || !formData.contact_phone) {
+            setError('Todos os campos de contato são obrigatórios.'); return false;
+        }
+        setError(null);
+        return true;
+    };
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!validateForm()) return;
+
+        if (!selectedCompany || !selectedEquipment) return;
+
+        setIsSubmitting(true);
+
+        const newTicketPayload = {
+            client_id: profile?.id,
+            company_id: selectedCompany.id,
+            status: 'aberto',
+            equipment_manufacturer: formData.manufacturer,
+            equipment_model: formData.model,
+            application_type: formData.application_type,
+            internal_location: formData.internal_location,
+            form_data: formData
+        };
+
+        console.log('🎫 Criando ticket com payload:', newTicketPayload);
+        console.log('👤 User ID atual (auth.uid()):', profile?.id);
+        console.log('🔑 Role do usuário:', profile?.role);
+
+        const { data, error: insertError } = await supabase
+            .from('tickets')
+            .insert([newTicketPayload])
+            .select();
+
+        setIsSubmitting(false);
+
+        if (insertError) {
+            console.error('❌ Erro ao criar ticket:', insertError);
+            console.error('📋 Detalhes do erro:', {
+                message: insertError.message,
+                details: insertError.details,
+                hint: insertError.hint,
+                code: insertError.code
+            });
+            setError(`Erro ao criar chamado: ${insertError.message}`);
+        } else {
+            console.log('Chamado criado:', data);
+            alert(`Chamado #${data[0].id} criado com sucesso!`);
+            setPage('dashboard');
+        }
+    };
+
+    // ==================== RENDERIZAÇÃO DAS ETAPAS ====================
+
+    const renderStepIndicator = () => (
+        <div className="mb-8">
+            <div className="flex items-center justify-between">
+                <div className={`flex items-center ${currentStep === 'cnpj-search' ? 'text-blue-600' : 'text-green-600'}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${currentStep === 'cnpj-search' ? 'bg-blue-600 text-white' : 'bg-green-600 text-white'}`}>
+                        {currentStep === 'cnpj-search' ? '1' : <CheckCircle className="h-5 w-5" />}
+                    </div>
+                    <span className="ml-2 font-medium">CNPJ</span>
+                </div>
+                <div className="flex-1 h-1 mx-4 bg-gray-300">
+                    <div className={`h-full transition-all ${currentStep !== 'cnpj-search' ? 'bg-green-600 w-full' : 'bg-gray-300 w-0'}`} />
+                </div>
+                <div className={`flex items-center ${currentStep === 'equipment-selection' ? 'text-blue-600' : currentStep === 'ticket-form' ? 'text-green-600' : 'text-gray-400'}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${currentStep === 'equipment-selection' ? 'bg-blue-600 text-white' : currentStep === 'ticket-form' ? 'bg-green-600 text-white' : 'bg-gray-300 text-gray-600'}`}>
+                        {currentStep === 'ticket-form' ? <CheckCircle className="h-5 w-5" /> : '2'}
+                    </div>
+                    <span className="ml-2 font-medium">Equipamento</span>
+                </div>
+                <div className="flex-1 h-1 mx-4 bg-gray-300">
+                    <div className={`h-full transition-all ${currentStep === 'ticket-form' ? 'bg-green-600 w-full' : 'bg-gray-300 w-0'}`} />
+                </div>
+                <div className={`flex items-center ${currentStep === 'ticket-form' ? 'text-blue-600' : 'text-gray-400'}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${currentStep === 'ticket-form' ? 'bg-blue-600 text-white' : 'bg-gray-300 text-gray-600'}`}>
+                        3
+                    </div>
+                    <span className="ml-2 font-medium">Chamado</span>
+                </div>
+            </div>
+        </div>
+    );
+
+    const renderCNPJSearch = () => (
+        <div className="space-y-6">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-start">
+                    <Building2 className="h-6 w-6 text-blue-600 mt-0.5 mr-3" />
+                    <div>
+                        <h3 className="text-lg font-semibold text-blue-900 mb-1">
+                            Etapa 1: Identificação da Empresa
+                        </h3>
+                        <p className="text-sm text-blue-700">
+                            Informe o CNPJ da empresa para a qual o chamado será aberto.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow-md p-6">
+                <div className="space-y-4">
+                    <div className="relative">
+                        <Input
+                            id="cnpj"
+                            label="CNPJ da Empresa"
+                            value={cnpj}
+                            onChange={handleCNPJChange}
+                            placeholder="00.000.000/0000-00"
+                            maxLength={18}
+                            disabled={cnpjLoading || !!selectedCompany}
+                        />
+                        {!selectedCompany && (
+                            <Button
+                                type="button"
+                                onClick={handleCNPJSearch}
+                                disabled={cnpjLoading || !cnpj}
+                                className="absolute right-1 bottom-1 !py-2 !px-3"
+                            >
+                                {cnpjLoading ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Search className="h-4 w-4" />
+                                )}
+                            </Button>
+                        )}
+                    </div>
+
+                    {cnpjError && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start">
+                            <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 mr-3 flex-shrink-0" />
+                            <div>
+                                <p className="text-sm font-medium text-red-900">Erro na busca</p>
+                                <p className="text-sm text-red-700 mt-1">{cnpjError}</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {selectedCompany && (
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                            <div className="flex items-start justify-between">
+                                <div className="flex items-start">
+                                    <Building2 className="h-5 w-5 text-green-600 mt-0.5 mr-3" />
+                                    <div>
+                                        <p className="text-sm font-medium text-green-900">Empresa encontrada!</p>
+                                        <p className="text-lg font-bold text-green-900 mt-1">{selectedCompany.name}</p>
+                                        <p className="text-sm text-green-700 mt-1">CNPJ: {cnpj}</p>
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setSelectedCompany(null);
+                                        setCNPJ('');
+                                    }}
+                                    className="text-sm text-green-700 hover:text-green-900 underline"
+                                >
+                                    Alterar
+                                </button>
+                            </div>
+
+                            <div className="mt-4 pt-4 border-t border-green-200">
+                                <Button
+                                    type="button"
+                                    onClick={handleCNPJConfirm}
+                                    variant="primary"
+                                    className="w-full"
+                                >
+                                    Continuar para Seleção de Equipamentos
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {!selectedCompany && (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <p className="text-xs text-gray-600">
+                        <strong>Nota:</strong> Se o CNPJ da sua empresa não for encontrado,
+                        entre em contato com o suporte para realizar o cadastro.
+                    </p>
+                </div>
+            )}
+        </div>
+    );
+
+    const renderEquipmentSelection = () => (
+        <div className="space-y-6">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-start justify-between">
+                    <div className="flex items-start">
+                        <Wrench className="h-6 w-6 text-blue-600 mt-0.5 mr-3" />
+                        <div>
+                            <h3 className="text-lg font-semibold text-blue-900 mb-1">
+                                Etapa 2: Seleção de Equipamento
+                            </h3>
+                            <p className="text-sm text-blue-700">
+                                Selecione o equipamento com problema ou cadastre um novo.
+                            </p>
+                            <p className="text-xs text-blue-600 mt-1">
+                                Empresa: <strong>{selectedCompany?.name}</strong>
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setCurrentStep('cnpj-search')}
+                        className="text-sm text-blue-700 hover:text-blue-900 flex items-center"
+                    >
+                        <ArrowLeft className="h-4 w-4 mr-1" />
+                        Voltar
+                    </button>
+                </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow-md p-6">
+                {equipmentsLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                    </div>
+                ) : (
+                    <div className="space-y-4">
+                        {equipments.length > 0 ? (
+                            <div>
+                                <h4 className="font-semibold text-gray-900 mb-3">
+                                    Equipamentos Cadastrados ({equipments.length})
+                                </h4>
+                                <div className="space-y-2">
+                                    {equipments.map((equipment) => (
+                                        <button
+                                            key={equipment.id}
+                                            type="button"
+                                            onClick={() => handleEquipmentSelect(equipment)}
+                                            className="w-full text-left p-4 border border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                                        >
+                                            <div className="flex items-start justify-between">
+                                                <div className="flex-1">
+                                                    <p className="font-bold text-gray-900 text-lg">
+                                                        {equipment.manufacturer} - {equipment.model}
+                                                    </p>
+                                                    {equipment.internal_location && (
+                                                        <p className="text-sm text-gray-700 mt-1">
+                                                            <span className="font-medium">Local:</span> {equipment.internal_location}
+                                                        </p>
+                                                    )}
+                                                    {equipment.serial_number && (
+                                                        <p className="text-sm text-gray-600 mt-0.5">
+                                                            <span className="font-medium">Serial:</span> {equipment.serial_number}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                                <Wrench className="h-5 w-5 text-gray-400" />
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
+                                <AlertCircle className="h-12 w-12 text-yellow-600 mx-auto mb-3" />
+                                <h4 className="font-semibold text-yellow-900 mb-2">
+                                    Nenhum equipamento cadastrado
+                                </h4>
+                                <p className="text-sm text-yellow-700 mb-4">
+                                    Não encontramos equipamentos cadastrados para <strong>{selectedCompany?.name}</strong>.
+                                    <br />
+                                    Cadastre um novo equipamento para continuar.
+                                </p>
+                            </div>
+                        )}
+
+                        {!showNewEquipmentForm ? (
+                            <Button
+                                type="button"
+                                onClick={() => setShowNewEquipmentForm(true)}
+                                variant="secondary"
+                                className="w-full"
+                            >
+                                <Plus className="h-5 w-5 mr-2" />
+                                Cadastrar Novo Equipamento
+                            </Button>
+                        ) : (
+                            <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                                <h4 className="font-semibold text-gray-900 mb-4">Novo Equipamento</h4>
+                                <div className="space-y-3">
+                                    <Input
+                                        id="manufacturer"
+                                        name="manufacturer"
+                                        label="Fabricante *"
+                                        value={newEquipment.manufacturer}
+                                        onChange={handleNewEquipmentChange}
+                                        required
+                                    />
+                                    <Input
+                                        id="model"
+                                        name="model"
+                                        label="Modelo *"
+                                        value={newEquipment.model}
+                                        onChange={handleNewEquipmentChange}
+                                        required
+                                    />
+                                    <Input
+                                        id="serial_number"
+                                        name="serial_number"
+                                        label="Número de Série"
+                                        value={newEquipment.serial_number}
+                                        onChange={handleNewEquipmentChange}
+                                    />
+                                    <Select
+                                        id="application_type"
+                                        name="application_type"
+                                        label="Tipo de Aplicação"
+                                        value={newEquipment.application_type}
+                                        onChange={handleNewEquipmentChange}
+                                    >
+                                        <option value="">Selecione...</option>
+                                        <option value="Acesso">Acesso</option>
+                                        <option value="Ponto">Ponto</option>
+                                    </Select>
+                                    <Select
+                                        id="tecnology"
+                                        name="tecnology"
+                                        label="Tecnologia"
+                                        value={newEquipment.tecnology}
+                                        onChange={handleNewEquipmentChange}
+                                    >
+                                        <option value="">Selecione...</option>
+                                        <option value="Proximidade RFID">Proximidade RFID</option>
+                                        <option value="Biometria finger detection">Biometria finger detection</option>
+                                        <option value="Smartcard">Smartcard</option>
+                                        <option value="Facial">Facial</option>
+                                    </Select>
+                                    <Input
+                                        id="internal_location"
+                                        name="internal_location"
+                                        label="Local Interno"
+                                        placeholder="Ex: Portaria Principal, Recepção"
+                                        value={newEquipment.internal_location}
+                                        onChange={handleNewEquipmentChange}
+                                    />
+
+                                    {/* Busca de CEP */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            CEP do Endereço de Instalação
+                                        </label>
+                                        <div className="flex space-x-2">
+                                            <Input
+                                                id="equipment_cep"
+                                                name="cep"
+                                                label=""
+                                                placeholder="00000-000"
+                                                value={newEquipment.cep}
+                                                onChange={handleNewEquipmentChange}
+                                                className="flex-1"
+                                            />
+                                            <Button
+                                                type="button"
+                                                onClick={handleEquipmentCepSearch}
+                                                isLoading={equipmentCepLoading}
+                                                variant="secondary"
+                                                className="whitespace-nowrap"
+                                            >
+                                                <Search className="h-4 w-4 mr-1" />
+                                                Buscar
+                                            </Button>
+                                        </div>
+                                    </div>
+
+                                    <Textarea
+                                        id="installation_location"
+                                        name="installation_location"
+                                        label="Endereço de Instalação"
+                                        placeholder="Endereço completo onde o equipamento está instalado"
+                                        value={newEquipment.installation_location}
+                                        onChange={handleNewEquipmentChange}
+                                        rows={3}
+                                    />
+
+                                    {error && (
+                                        <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
+                                            {error}
+                                        </div>
+                                    )}
+
+                                    <div className="flex gap-3 pt-4">
+                                        {/* Botão Cadastrar e Continuar */}
+                                        <button
+                                            type="button"
+                                            onClick={handleCreateEquipment}
+                                            disabled={equipmentsLoading}
+                                            className={`
+                                                relative flex-1 inline-flex items-center justify-center px-6 py-3.5 
+                                                font-semibold text-white rounded-lg overflow-hidden
+                                                transition-all duration-300 ease-out
+                                                ${equipmentsLoading
+                                                    ? 'bg-gray-400 cursor-not-allowed'
+                                                    : 'bg-gradient-to-r from-blue-500 via-blue-600 to-indigo-600 hover:from-blue-600 hover:via-blue-700 hover:to-indigo-700 shadow-lg hover:shadow-xl hover:scale-105 active:scale-95'
+                                                }
+                                            `}
+                                        >
+                                            {/* Efeito de brilho animado */}
+                                            {!equipmentsLoading && (
+                                                <span className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white to-transparent opacity-20 animate-shimmer"></span>
+                                            )}
+
+                                            {/* Conteúdo do botão */}
+                                            <span className="relative flex items-center gap-2">
+                                                {equipmentsLoading ? (
+                                                    <>
+                                                        <Loader2 className="h-5 w-5 animate-spin" />
+                                                        <span>Cadastrando...</span>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <CheckCircle className="h-5 w-5" />
+                                                        <span>Cadastrar e Continuar</span>
+                                                    </>
+                                                )}
+                                            </span>
+                                        </button>
+
+                                        {/* Botão Cancelar */}
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setShowNewEquipmentForm(false);
+                                                setError(null);
+                                            }}
+                                            className="
+                                                px-6 py-3.5 font-semibold text-gray-700 bg-white border-2 border-gray-300 
+                                                rounded-lg hover:bg-gray-50 hover:border-gray-400 hover:shadow-md
+                                                transition-all duration-200 ease-out
+                                                active:scale-95
+                                            "
+                                        >
+                                            Cancelar
+                                        </button>
+                                    </div>
+
+                                    {/* Estilos customizados para animação de brilho */}
+                                    <style>{`
+                                        @keyframes shimmer {
+                                            0% { transform: translateX(-100%); }
+                                            100% { transform: translateX(100%); }
+                                        }
+                                        .animate-shimmer {
+                                            animation: shimmer 2.5s infinite;
+                                        }
+                                    `}</style>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+
+    const renderTicketForm = () => {
+        // Calcula os números das seções dinamicamente
+        let sectionNum = 0;
+        const hasApplicationType = !!selectedEquipment?.application_type;
+        const hasTecnology = !!selectedEquipment?.tecnology;
+
+        return (
+            <div className="space-y-6">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-start justify-between">
+                        <div className="flex items-start">
+                            <CheckCircle className="h-6 w-6 text-blue-600 mt-0.5 mr-3" />
+                            <div>
+                                <h3 className="text-lg font-semibold text-blue-900 mb-1">
+                                    Etapa 3: Detalhes do Chamado
+                                </h3>
+                                <p className="text-sm text-blue-700">
+                                    Preencha as informações sobre o problema.
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setCurrentStep('equipment-selection')}
+                            className="text-sm text-blue-700 hover:text-blue-900 flex items-center"
+                        >
+                            <ArrowLeft className="h-4 w-4 mr-1" />
+                            Voltar
+                        </button>
+                    </div>
+                </div>
+
+                <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-xl p-8 space-y-6">
+
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                        <p className="text-sm font-medium text-gray-700 mb-3">Equipamento Selecionado:</p>
+                        <div className="space-y-2">
+                            <p className="text-lg font-bold text-gray-900">
+                                {selectedEquipment?.manufacturer} - {selectedEquipment?.model}
+                            </p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                                {selectedEquipment?.internal_location && (
+                                    <p className="text-gray-700">
+                                        <span className="font-medium">Local:</span> {selectedEquipment.internal_location}
+                                    </p>
+                                )}
+                                {selectedEquipment?.serial_number && (
+                                    <p className="text-gray-700">
+                                        <span className="font-medium">Nº Série:</span> {selectedEquipment.serial_number}
+                                    </p>
+                                )}
+                                {selectedEquipment?.application_type && (
+                                    <p className="text-gray-700">
+                                        <span className="font-medium">Aplicação:</span> {selectedEquipment.application_type}
+                                    </p>
+                                )}
+                                {selectedEquipment?.tecnology && (
+                                    <p className="text-gray-700">
+                                        <span className="font-medium">Tecnologia:</span> {selectedEquipment.tecnology}
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Só mostra a seção de Tipo de Aplicação se o equipamento NÃO tiver */}
+                    {!hasApplicationType && (
+                        <FormSection number={++sectionNum} title="Tipo de aplicação">
+                            <Select
+                                id="application_type"
+                                name="application_type"
+                                label="Tipo de Aplicação"
+                                value={formData.application_type}
+                                onChange={handleChange}
+                                required
+                            >
+                                <option value="">Selecione...</option>
+                                <option value="Acesso">Acesso</option>
+                                <option value="Ponto">Ponto</option>
+                            </Select>
+                        </FormSection>
+                    )}
+
+                    <FormSection number={++sectionNum} title="Descreva o problema">
+                        <div className="md:col-span-2">
+                            <div className="mb-4 p-4 bg-gradient-to-r from-green-50 to-blue-50 border-l-4 border-green-500 rounded-lg shadow-sm">
+                                <div className="flex items-start gap-3">
+                                    <div className="flex-shrink-0 mt-0.5">
+                                        <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                    </div>
+                                    <div className="flex-1">
+                                        <p className="text-sm font-semibold text-gray-800 mb-2">
+                                            � Importante: Envie também um vídeo do problema!
+                                        </p>
+                                        <p className="text-sm text-gray-700 mb-2">
+                                            Se possível, grave um vídeo mostrando o problema e envie para um dos nossos telefones WhatsApp:
+                                        </p>
+                                        <div className="flex flex-wrap gap-3 mt-3">
+                                            <a
+                                                href="https://wa.me/5519999492176"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium text-sm transition-colors shadow-sm"
+                                            >
+                                                <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                                                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L0 24l6.304-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+                                                </svg>
+                                                19 99949-2176
+                                            </a>
+                                            <a
+                                                href="https://wa.me/554730395061"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium text-sm transition-colors shadow-sm"
+                                            >
+                                                <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                                                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L0 24l6.304-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+                                                </svg>
+                                                47 3039-5061
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <Textarea
+                                id="problem_description"
+                                name="problem_description"
+                                label="Descrição Detalhada (mínimo 30 caracteres)"
+                                value={formData.problem_description}
+                                onChange={handleChange}
+                                minLength={30}
+                                required
+                            />
+                        </div>
+                    </FormSection>
+
+                    {/* Só mostra a seção de Tecnologia/Cartão se o equipamento NÃO tiver */}
+                    {!hasTecnology && (
+                        <FormSection number={++sectionNum} title="Tipo de cartão utilizado">
+                            <Select
+                                id="card_type"
+                                name="card_type"
+                                label="Tipo de Cartão/Tecnologia"
+                                value={formData.card_type}
+                                onChange={handleChange}
+                                required
+                            >
+                                <option value="">Selecione...</option>
+                                <option value="Smartcard">Cartão smartcard</option>
+                                <option value="Proximidade HID">Proximidade HID</option>
+                                <option value="Biometria">Biometria</option>
+                                <option value="Facial">Facial</option>
+                            </Select>
+                        </FormSection>
+                    )}
+
+                    <FormSection number={++sectionNum} title="Procedimentos já executados">
+                        <div className="md:col-span-2">
+                            <Textarea
+                                id="previous_procedures"
+                                name="previous_procedures"
+                                label="Procedimentos Prévios (opcional)"
+                                value={formData.previous_procedures}
+                                onChange={handleChange}
+                            />
+                        </div>
+                    </FormSection>
+
+                    <FormSection number={++sectionNum} title="Endereço para atendimento">
+                        <div className="md:col-span-2 space-y-4">
+                            {/* Mostra endereço cadastrado da empresa */}
+                            {selectedCompany?.full_address && (
+                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                    <p className="text-sm font-medium text-blue-900 mb-2">
+                                        Endereço cadastrado da empresa:
+                                    </p>
+                                    <p className="text-gray-900">{selectedCompany.full_address}</p>
+                                </div>
+                            )}
+
+                            {/* Pergunta se o atendimento será neste endereço */}
+                            {useCompanyAddress === null && selectedCompany?.full_address && (
+                                <div className="flex flex-col gap-3">
+                                    <p className="text-sm font-medium text-gray-900">
+                                        O atendimento será realizado neste endereço?
+                                    </p>
+                                    <div className="flex gap-2">
+                                        <Button
+                                            type="button"
+                                            onClick={() => {
+                                                setUseCompanyAddress(true);
+                                                setFormData(prev => ({
+                                                    ...prev,
+                                                    full_address: selectedCompany.full_address || ''
+                                                }));
+                                            }}
+                                            className="flex-1"
+                                        >
+                                            Sim, utilizar este endereço
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            onClick={() => setUseCompanyAddress(false)}
+                                            variant="secondary"
+                                            className="flex-1"
+                                        >
+                                            Não, informar outro endereço
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Mostra campos para editar apenas se escolheu "Não" ou não tem endereço cadastrado */}
+                            {(useCompanyAddress === false || !selectedCompany?.full_address) && (
+                                <>
+                                    <div className="relative">
+                                        <Input
+                                            id="address_cep"
+                                            name="address_cep"
+                                            label="CEP"
+                                            value={formData.address_cep}
+                                            onChange={handleChange}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={handleCepSearch}
+                                            disabled={cepLoading}
+                                            className="absolute right-1 bottom-1 bg-gray-200 p-2 rounded-md hover:bg-gray-300 disabled:opacity-50"
+                                        >
+                                            {cepLoading ? (
+                                                <Loader2 className="h-4 w-4 text-gray-600 animate-spin" />
+                                            ) : (
+                                                <Search className="h-4 w-4 text-gray-600" />
+                                            )}
+                                        </button>
+                                    </div>
+                                    <Input
+                                        id="full_address"
+                                        name="full_address"
+                                        label="Endereço Completo"
+                                        value={formData.full_address}
+                                        onChange={handleChange}
+                                        required
+                                    />
+                                </>
+                            )}
+
+                            {/* Se escolheu "Sim", mostra apenas resumo confirmado */}
+                            {useCompanyAddress === true && (
+                                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                                    <div className="flex items-start justify-between">
+                                        <div className="flex-1">
+                                            <p className="text-sm font-medium text-green-900 mb-1">
+                                                ✓ Endereço confirmado para atendimento:
+                                            </p>
+                                            <p className="text-gray-900">{formData.full_address}</p>
+                                            {formData.address_cep && (
+                                                <p className="text-sm text-gray-600 mt-1">CEP: {formData.address_cep}</p>
+                                            )}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setUseCompanyAddress(null);
+                                                setFormData(prev => ({ ...prev, full_address: '', address_cep: '' }));
+                                            }}
+                                            className="text-sm text-blue-600 hover:text-blue-800 ml-4"
+                                        >
+                                            Alterar
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </FormSection>
+
+                    <FormSection number={++sectionNum} title="Local interno">
+                        <Input
+                            id="internal_location"
+                            name="internal_location"
+                            label="Ex: Portaria 1, Catraca Refeitório"
+                            value={formData.internal_location}
+                            onChange={handleChange}
+                            required
+                        />
+                    </FormSection>
+
+                    <FormSection number={++sectionNum} title="Necessário integração?">
+                        <div className="md:col-span-2 space-y-4">
+                            <div className="flex items-center">
+                                <input
+                                    id="integration_needed"
+                                    name="integration_needed"
+                                    type="checkbox"
+                                    checked={formData.integration_needed}
+                                    onChange={handleChange}
+                                    className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                />
+                                <label htmlFor="integration_needed" className="ml-2 block text-sm text-gray-900">
+                                    Sim, é necessário
+                                </label>
+                            </div>
+                            {formData.integration_needed && (
+                                <Textarea
+                                    id="integration_requirements"
+                                    name="integration_requirements"
+                                    label="Quais são as exigências?"
+                                    value={formData.integration_requirements}
+                                    onChange={handleChange}
+                                />
+                            )}
+                        </div>
+                    </FormSection>
+
+                    <FormSection number={++sectionNum} title="Responsável pelo acompanhamento">
+                        <Input
+                            id="contact_name"
+                            name="contact_name"
+                            label="Nome Completo"
+                            icon={<User />}
+                            value={formData.contact_name}
+                            onChange={handleChange}
+                            required
+                        />
+                        <Input
+                            id="contact_email"
+                            name="contact_email"
+                            label="E-mail"
+                            type="email"
+                            icon={<Mail />}
+                            value={formData.contact_email}
+                            onChange={handleChange}
+                            required
+                        />
+                        <Input
+                            id="contact_phone"
+                            name="contact_phone"
+                            label="Telefone/Celular"
+                            type="tel"
+                            icon={<Phone />}
+                            value={formData.contact_phone}
+                            onChange={handleChange}
+                            required
+                        />
+                    </FormSection>
+
+                    <div className="mt-8 pt-5 border-t border-gray-200">
+                        {error && (
+                            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-md mb-4">
+                                <strong className="font-bold">Erro!</strong>
+                                <span className="block sm:inline"> {error}</span>
+                            </div>
+                        )}
+                        <div className="flex justify-end space-x-3">
+                            <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => setPage('dashboard')}
+                                disabled={isSubmitting}
+                            >
+                                Cancelar
+                            </Button>
+                            <Button
+                                type="submit"
+                                variant="primary"
+                                isLoading={isSubmitting}
+                                disabled={isSubmitting}
+                            >
+                                <CheckCircle className="h-5 w-5 mr-2" />
+                                Enviar Chamado
+                            </Button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        );
+    };
+
+    return (
+        <div className="p-6 md:p-10 max-w-4xl mx-auto">
+            <div className="flex items-center justify-between mb-6">
+                <h1 className="text-3xl font-bold text-gray-900">Abrir Novo Chamado</h1>
+                <button
+                    onClick={() => setPage('dashboard')}
+                    className="text-gray-600 hover:text-gray-900"
+                    title="Voltar para o dashboard"
+                    aria-label="Voltar para o dashboard"
+                >
+                    <ArrowLeft className="h-6 w-6" />
+                </button>
+            </div>
+
+            {renderStepIndicator()}
+
+            {currentStep === 'cnpj-search' && renderCNPJSearch()}
+            {currentStep === 'equipment-selection' && renderEquipmentSelection()}
+            {currentStep === 'ticket-form' && renderTicketForm()}
+        </div>
+    );
+};
