@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Search, CheckCircle, Loader2, Building2, AlertCircle, Wrench, Plus, ArrowLeft, Mail, Phone, User } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../services/supabaseClient';
+import { emailService } from '../services/emailService';
 import type { TicketFormData, Page, Company, Equipment } from '../types';
 import { Input } from '../components/ui/Input';
 import { Textarea } from '../components/ui/Textarea';
@@ -343,12 +344,12 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage }) => {
         e.preventDefault();
         if (!validateForm()) return;
 
-        if (!selectedCompany || !selectedEquipment) return;
+        if (!selectedCompany || !selectedEquipment || !profile) return;
 
         setIsSubmitting(true);
 
         const newTicketPayload = {
-            client_id: profile?.id,
+            client_id: profile.id,
             company_id: selectedCompany.id,
             status: 'aberto',
             equipment_manufacturer: formData.manufacturer,
@@ -359,15 +360,13 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage }) => {
         };
 
         console.log('🎫 Criando ticket com payload:', newTicketPayload);
-        console.log('👤 User ID atual (auth.uid()):', profile?.id);
-        console.log('🔑 Role do usuário:', profile?.role);
+        console.log('👤 User ID atual (auth.uid()):', profile.id);
+        console.log('🔑 Role do usuário:', profile.role);
 
         const { data, error: insertError } = await supabase
             .from('tickets')
             .insert([newTicketPayload])
             .select();
-
-        setIsSubmitting(false);
 
         if (insertError) {
             console.error('❌ Erro ao criar ticket:', insertError);
@@ -378,9 +377,59 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage }) => {
                 code: insertError.code
             });
             setError(`Erro ao criar chamado: ${insertError.message}`);
+            setIsSubmitting(false);
         } else {
-            console.log('Chamado criado:', data);
-            alert(`Chamado #${data[0].id} criado com sucesso!`);
+            console.log('✅ Chamado criado:', data);
+            const ticketId = data[0].id;
+
+            // 📧 Buscar emails dos administradores
+            console.log('📧 Buscando administradores para notificar...');
+            const { data: admins } = await supabase
+                .from('user_profiles')
+                .select('email, full_name')
+                .eq('role', 'admin');
+
+            const adminEmails = admins?.map(admin => admin.email) || [];
+            console.log(`📧 Encontrados ${adminEmails.length} administrador(es)`);
+
+            // 📧 Enviar emails de notificação
+            console.log('📧 Enviando notificações por email...');
+
+            const equipmentInfo = `${formData.manufacturer} - ${formData.model}`;
+
+            try {
+                const emailSent = await emailService.sendTicketCreatedNotification({
+                    ticketId: ticketId,
+                    clientName: profile.full_name,
+                    clientEmail: profile.email,
+                    companyName: selectedCompany.name,
+                    equipmentInfo: equipmentInfo,
+                    problemDescription: formData.problem_description,
+                    contactName: formData.contact_name,
+                    contactEmail: formData.contact_email,
+                    contactPhone: formData.contact_phone,
+                    internalLocation: formData.internal_location,
+                    fullAddress: formData.full_address
+                }, adminEmails);
+
+                if (emailSent) {
+                    console.log('✅ Emails enviados com sucesso!');
+                } else {
+                    console.warn('⚠️ Erro ao enviar emails (chamado criado com sucesso)');
+                }
+            } catch (emailError) {
+                console.error('❌ Erro ao enviar emails:', emailError);
+                // Não bloqueia o fluxo, apenas loga o erro
+            }
+
+            setIsSubmitting(false);
+            alert(
+                `✅ Chamado #${ticketId} criado com sucesso!\n\n` +
+                `📧 Notificações enviadas para:\n` +
+                `   • Você: ${profile.email}\n` +
+                `   • Responsável local: ${formData.contact_name} (${formData.contact_email})\n` +
+                `   • Administradores: ${adminEmails.length} pessoa(s)`
+            );
             setPage('dashboard');
         }
     };

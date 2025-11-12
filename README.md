@@ -55,9 +55,39 @@ Crie um arquivo `.env.local` na raiz do projeto:
 VITE_SUPABASE_URL=https://seu-projeto.supabase.co
 VITE_SUPABASE_ANON_KEY=sua-chave-anonima
 VITE_SUPABASE_SERVICE_ROLE_KEY=sua-service-role-key
+
+# Configuração de Email (Resend) - Opcional
+VITE_RESEND_API_KEY=re_sua_chave_aqui
+VITE_RESEND_FROM_EMAIL=noreply@seudominio.com
 ```
 
 ⚠️ **IMPORTANTE**: Nunca commite o arquivo `.env.local` (já está no `.gitignore`)
+
+### 📧 Configuração de Emails (Opcional mas Recomendado)
+
+O sistema envia emails automáticos quando chamados são criados. Para habilitar:
+
+1. **Crie uma conta gratuita no [Resend](https://resend.com)**
+   - Plano gratuito: 3.000 emails/mês, 100 emails/dia
+   
+2. **Obtenha sua API Key**
+   - Acesse o dashboard do Resend
+   - Vá em **API Keys** → **Create API Key**
+   - Copie a chave gerada
+
+3. **Configure o domínio de envio**
+   - Em **Domains**, adicione seu domínio (ex: `seudominio.com`)
+   - Ou use `onboarding@resend.dev` para testes
+
+4. **Adicione as variáveis no `.env.local`**
+   ```env
+   VITE_RESEND_API_KEY=re_abc123xyz...
+   VITE_RESEND_FROM_EMAIL=noreply@seudominio.com
+   ```
+
+**Emails enviados automaticamente:**
+- ✉️ Cliente recebe confirmação ao criar chamado
+- ✉️ Responsável local recebe notificação (dados do contato no formulário)
 
 4. **Configure o banco de dados**
 

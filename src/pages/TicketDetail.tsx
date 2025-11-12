@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Loader2, Calendar, User, Building2, Wrench, MapPin, Phone, Mail, FileText, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Loader2, Calendar, User, Building2, Wrench, MapPin, Phone, Mail, FileText, CheckCircle, MessageCircle, Send } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
-import type { Ticket, Page, TicketStatus } from '../types';
+import { emailService } from '../services/emailService';
+import type { Ticket, Page, TicketStatus, TicketComment } from '../types';
 import { Button } from '../components/ui/Button';
+import { Textarea } from '../components/ui/Textarea';
 import { useAuth } from '../hooks/useAuth';
 
 interface TicketDetailPageProps {
@@ -16,6 +18,13 @@ export const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketId, se
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [updating, setUpdating] = useState(false);
+
+    // Estados para comentários
+    const [comments, setComments] = useState<TicketComment[]>([]);
+    const [loadingComments, setLoadingComments] = useState(false);
+    const [newComment, setNewComment] = useState('');
+    const [isInternalComment, setIsInternalComment] = useState(false);
+    const [submittingComment, setSubmittingComment] = useState(false);
 
     useEffect(() => {
         const fetchTicket = async () => {
@@ -37,8 +46,118 @@ export const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketId, se
             setLoading(false);
         };
 
+        const fetchComments = async () => {
+            setLoadingComments(true);
+
+            const { data, error: fetchError } = await supabase
+                .from('ticket_comments')
+                .select(`
+                    *,
+                    user:user_profiles(id, full_name, email, role)
+                `)
+                .eq('ticket_id', ticketId)
+                .order('created_at', { ascending: true });
+
+            if (fetchError) {
+                console.error('Erro ao buscar comentários:', fetchError);
+            } else {
+                setComments(data || []);
+            }
+            setLoadingComments(false);
+        };
+
         fetchTicket();
+        fetchComments();
     }, [ticketId]);
+
+    // Adicionar novo comentário
+    const handleAddComment = async () => {
+        if (!newComment.trim() || !profile) return;
+
+        setSubmittingComment(true);
+
+        const commentData = {
+            ticket_id: ticketId,
+            user_id: profile.id,
+            comment: newComment.trim(),
+            is_internal: isInternalComment && (profile.role === 'admin' || profile.role === 'tecnico')
+        };
+
+        const { data, error: insertError } = await supabase
+            .from('ticket_comments')
+            .insert([commentData])
+            .select(`
+                *,
+                user:user_profiles(id, full_name, email, role)
+            `)
+            .single();
+
+        if (insertError) {
+            console.error('Erro ao adicionar comentário:', insertError);
+            alert(`Erro ao adicionar comentário: ${insertError.message}`);
+        } else {
+            console.log('✅ Comentário adicionado:', data);
+            setComments(prev => [...prev, data]);
+            setNewComment('');
+            setIsInternalComment(false);
+
+            // 📧 Enviar notificações por email (se não for comentário interno)
+            if (!commentData.is_internal && ticket) {
+                try {
+                    // Buscar dados do cliente e empresa
+                    const { data: clientData } = await supabase
+                        .from('user_profiles')
+                        .select('full_name, email')
+                        .eq('id', ticket.client_id)
+                        .single();
+
+                    const { data: companyData } = await supabase
+                        .from('companies')
+                        .select('name')
+                        .eq('id', ticket.company_id)
+                        .single();
+
+                    if (clientData && companyData) {
+                        // Enviar email para o cliente (se o comentário não foi dele)
+                        if (profile.id !== ticket.client_id) {
+                            await emailService.sendCommentNotification({
+                                ticketId: ticketId,
+                                commentAuthor: profile.full_name,
+                                commentText: newComment.trim(),
+                                recipientName: clientData.full_name,
+                                recipientEmail: clientData.email,
+                                companyName: companyData.name
+                            });
+                        }
+
+                        // Enviar para admins também (se o comentário foi do cliente)
+                        if (profile.role === 'cliente') {
+                            const { data: admins } = await supabase
+                                .from('user_profiles')
+                                .select('email')
+                                .eq('role', 'admin');
+
+                            const adminEmails = admins?.map(a => a.email) || [];
+                            if (adminEmails.length > 0) {
+                                await emailService.sendCommentNotification({
+                                    ticketId: ticketId,
+                                    commentAuthor: profile.full_name,
+                                    commentText: newComment.trim(),
+                                    recipientName: 'Administrador',
+                                    recipientEmail: adminEmails[0], // Simplificado
+                                    companyName: companyData.name
+                                });
+                            }
+                        }
+                    }
+                } catch (emailError) {
+                    console.error('Erro ao enviar email de notificação:', emailError);
+                }
+            }
+        }
+
+        setSubmittingComment(false);
+    };
 
     const handleCloseTicket = async () => {
         if (!ticket || ticket.status === 'fechado') return;
@@ -327,6 +446,127 @@ export const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketId, se
                         )}
                     </>
                 )}
+
+                {/* Seção de Comentários */}
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <div className="flex items-center mb-4">
+                        <MessageCircle className="h-6 w-6 text-blue-600 mr-2" />
+                        <h2 className="text-xl font-semibold text-gray-900">Comentários</h2>
+                    </div>
+
+                    {/* Lista de Comentários */}
+                    {loadingComments ? (
+                        <div className="flex justify-center items-center py-8">
+                            <Loader2 className="h-8 w-8 text-blue-600 animate-spin" />
+                        </div>
+                    ) : comments.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">
+                            <MessageCircle className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+                            <p>Nenhum comentário ainda</p>
+                            <p className="text-sm">Seja o primeiro a comentar</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-4 mb-6">
+                            {comments.map((comment) => (
+                                <div
+                                    key={comment.id}
+                                    className={`border rounded-lg p-4 ${comment.is_internal
+                                            ? 'bg-yellow-50 border-yellow-300'
+                                            : 'bg-gray-50 border-gray-200'
+                                        }`}
+                                >
+                                    <div className="flex items-start justify-between mb-2">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-semibold">
+                                                {comment.user?.full_name?.charAt(0).toUpperCase() || '?'}
+                                            </div>
+                                            <div>
+                                                <p className="font-medium text-gray-900">
+                                                    {comment.user?.full_name || 'Usuário'}
+                                                </p>
+                                                <p className="text-xs text-gray-500">
+                                                    {new Date(comment.created_at).toLocaleString('pt-BR')}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        {comment.is_internal && (
+                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-200 text-yellow-800">
+                                                🔒 Interno
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="text-gray-700 whitespace-pre-wrap ml-10">{comment.comment}</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Formulário de Novo Comentário */}
+                    {ticket.status !== 'fechado' && ticket.status !== 'cancelado' && (
+                        <div className="border-t pt-4">
+                            <div className="space-y-3">
+                                <Textarea
+                                    value={newComment}
+                                    onChange={(e) => setNewComment(e.target.value)}
+                                    placeholder="Adicione um comentário..."
+                                    rows={3}
+                                    className="w-full"
+                                />
+
+                                {/* Checkbox para comentário interno (apenas admin/tecnico) */}
+                                {profile?.role !== 'cliente' && (
+                                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                                        <input
+                                            type="checkbox"
+                                            checked={isInternalComment}
+                                            onChange={(e) => setIsInternalComment(e.target.checked)}
+                                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                        />
+                                        <span className="flex items-center gap-1">
+                                            🔒 Comentário interno (visível apenas para administradores e técnicos)
+                                        </span>
+                                    </label>
+                                )}
+
+                                <div className="flex justify-end">
+                                    <button
+                                        onClick={handleAddComment}
+                                        disabled={submittingComment || !newComment.trim()}
+                                        className={`
+                                            relative inline-flex items-center justify-center px-6 py-3
+                                            font-semibold text-white rounded-lg overflow-hidden
+                                            transition-all duration-300 ease-out
+                                            ${submittingComment || !newComment.trim()
+                                                ? 'bg-gray-400 cursor-not-allowed'
+                                                : 'bg-gradient-to-r from-blue-500 via-purple-500 to-indigo-600 hover:from-blue-600 hover:via-purple-600 hover:to-indigo-700 shadow-lg hover:shadow-xl hover:scale-105 active:scale-95'
+                                            }
+                                        `}
+                                    >
+                                        {/* Efeito de brilho animado */}
+                                        {!submittingComment && newComment.trim() && (
+                                            <span className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white to-transparent opacity-20 animate-shimmer"></span>
+                                        )}
+
+                                        {/* Conteúdo do botão */}
+                                        <span className="relative flex items-center gap-2">
+                                            {submittingComment ? (
+                                                <>
+                                                    <Loader2 className="h-5 w-5 animate-spin" />
+                                                    <span>Enviando...</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Send className="h-5 w-5" />
+                                                    <span>Enviar Comentário</span>
+                                                </>
+                                            )}
+                                        </span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
 
                 {/* Rodapé com datas */}
                 <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">

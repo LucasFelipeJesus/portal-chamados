@@ -378,12 +378,10 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = ({ setPage 
                                 Cor Primária
                             </label>
                             <div className="flex gap-3 items-center">
-                                <input
-                                    type="color"
-                                    value={primaryColor}
-                                    onChange={(e) => setPrimaryColor(e.target.value)}
-                                    className="h-10 w-20 rounded border border-gray-300 cursor-pointer"
-                                    aria-label="Seletor de cor primária"
+                                <div
+                                    className="h-10 w-20 rounded border border-gray-300 flex-shrink-0"
+                                    style={{ backgroundColor: primaryColor } as React.CSSProperties}
+                                    aria-label="Preview da cor primária"
                                 />
                                 <Input
                                     id="color_hex"

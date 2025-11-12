@@ -83,6 +83,17 @@ export interface Ticket {
     client?: UserProfile; // Opcional - Join com user_profiles (usuário que abriu)
 }
 
+export interface TicketComment {
+    id: number;
+    ticket_id: number;
+    user_id: UUID;
+    comment: string;
+    is_internal: boolean; // Comentário interno (apenas admin/técnico)
+    created_at: string;
+    updated_at: string;
+    user?: UserProfile; // Opcional - Join com user_profiles
+}
+
 // Contexto de Autenticação
 export interface AuthContextType {
     user: User | null;

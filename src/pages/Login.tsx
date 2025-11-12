@@ -6,8 +6,8 @@ import { Button } from '../components/ui/Button';
 import { supabase } from '../services/supabaseClient';
 
 export const LoginPage: React.FC = () => {
-    const [email, setEmail] = useState('cliente@empresa.com');
-    const [password, setPassword] = useState('123456');
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [clearing, setClearing] = useState(false);
