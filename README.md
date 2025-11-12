@@ -6,7 +6,7 @@ Sistema completo de gerenciamento de chamados técnicos desenvolvido com React +
 
 ### Cliente
 - 📝 Abertura de chamados com descrição detalhada
-- 📂 Upload de anexos (imagens, vídeos, documentos)
+- 📂 Upload de anexos (imagens, vídeos, documentos)--- futura implementação
 - 👁️ Visualização de histórico de chamados
 - 🔔 Notificações de atualizações
 - 📱 Interface responsiva
