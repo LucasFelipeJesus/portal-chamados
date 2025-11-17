@@ -6,9 +6,13 @@ import { Input } from '../components/ui/Input';
 
 interface CompanyManagementProps {
     setPage: (page: Page) => void;
+    openModal?: boolean;
+    initialCNPJ?: string;
+    onModalClose?: () => void;
+    onCompanyCreated?: (company: Company) => void;
 }
 
-export const CompanyManagementPage: React.FC<CompanyManagementProps> = ({ setPage }) => {
+export const CompanyManagementPage: React.FC<CompanyManagementProps> = ({ setPage, openModal, initialCNPJ, onModalClose, onCompanyCreated }) => {
     const [companies, setCompanies] = useState<Company[]>([]);
     const [filteredCompanies, setFilteredCompanies] = useState<Company[]>([]);
     const [loading, setLoading] = useState(true);
@@ -37,6 +41,20 @@ export const CompanyManagementPage: React.FC<CompanyManagementProps> = ({ setPag
     useEffect(() => {
         fetchCompanies();
     }, []);
+
+    // Abrir modal automaticamente quando openModal for true
+    useEffect(() => {
+        if (openModal) {
+            setModalMode('create');
+            setEditingCompany(null);
+            setFormData({
+                name: '',
+                cnpj: initialCNPJ || '',
+                full_address: ''
+            });
+            setIsModalOpen(true);
+        }
+    }, [openModal, initialCNPJ]);
 
     const fetchCompanies = async () => {
         console.log('🚀 [CompanyManagement] Iniciando fetchCompanies...');
@@ -119,6 +137,9 @@ export const CompanyManagementPage: React.FC<CompanyManagementProps> = ({ setPag
         setIsModalOpen(false);
         setEditingCompany(null);
         setFormData({ name: '', cnpj: '', full_address: '' });
+        if (onModalClose) {
+            onModalClose();
+        }
     };
 
     // Search CNPJ
@@ -177,16 +198,23 @@ export const CompanyManagementPage: React.FC<CompanyManagementProps> = ({ setPag
 
         try {
             if (modalMode === 'create') {
-                const { error: insertError } = await supabase
+                const { data, error: insertError } = await supabase
                     .from('companies')
                     .insert([{
                         name: formData.name,
                         cnpj: formData.cnpj,
                         full_address: formData.full_address || null
-                    }]);
+                    }])
+                    .select()
+                    .single();
 
                 if (insertError) throw insertError;
-                alert('Empresa criada com sucesso!');
+                alert('✅ Empresa criada com sucesso!');
+
+                // Chama callback se foi passado (quando vem do NewTicket)
+                if (onCompanyCreated && data) {
+                    onCompanyCreated(data);
+                }
             } else {
                 const { error: updateError } = await supabase
                     .from('companies')

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, LogIn, BarChart3, Building2, Users as UsersIcon, UserCircle, Settings } from 'lucide-react';
+import { ShieldCheck, LogIn, BarChart3, Building2, Users as UsersIcon, UserCircle, Settings, Wrench } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../services/supabaseClient';
 import type { Page } from '../types';
@@ -12,6 +12,7 @@ import { UserManagementPage } from '../pages/UserManagement';
 import { ProfilePage } from '../pages/Profile';
 import { FirstPasswordChangePage } from '../pages/FirstPasswordChange';
 import { SystemSettingsPage } from '../pages/SystemSettings';
+import { EquipmentManagement } from '../pages/EquipmentManagement';
 
 
 export const AppLayout: React.FC = () => {
@@ -20,6 +21,9 @@ export const AppLayout: React.FC = () => {
     const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
     const [portalName, setPortalName] = useState('Portal de Chamados');
     const [logoUrl, setLogoUrl] = useState<string | null>(null);
+    const [openCompanyModal, setOpenCompanyModal] = useState(false);
+    const [companyModalCNPJ, setCompanyModalCNPJ] = useState('');
+    const [onCompanyCreatedCallback, setOnCompanyCreatedCallback] = useState<((company: any) => void) | undefined>(undefined);
 
     // Buscar configurações do sistema (apenas uma vez)
     useEffect(() => {
@@ -59,12 +63,19 @@ export const AppLayout: React.FC = () => {
         setPage('ticket-detail');
     };
 
+    const handleOpenCompanyModal = (cnpj: string = '', onCreated?: (company: any) => void) => {
+        setCompanyModalCNPJ(cnpj);
+        setOpenCompanyModal(true);
+        setOnCompanyCreatedCallback(() => onCreated);
+        setPage('companies');
+    };
+
     const renderPage = () => {
         switch (page) {
             case 'dashboard':
                 return <DashboardPage key="dashboard" setPage={setPage} onViewTicket={handleViewTicket} />;
             case 'new-ticket':
-                return <NewTicketPage key="new-ticket" setPage={setPage} />;
+                return <NewTicketPage key="new-ticket" setPage={setPage} onOpenCompanyModal={handleOpenCompanyModal} />;
             case 'ticket-detail':
                 return selectedTicketId ? (
                     <TicketDetailPage key={`ticket-${selectedTicketId}`} ticketId={selectedTicketId} setPage={setPage} />
@@ -74,9 +85,30 @@ export const AppLayout: React.FC = () => {
             case 'reports':
                 return <ReportsPage key="reports" setPage={setPage} />;
             case 'companies':
-                return <CompanyManagementPage key="companies" setPage={setPage} />;
+                return <CompanyManagementPage
+                    key="companies"
+                    setPage={setPage}
+                    openModal={openCompanyModal}
+                    initialCNPJ={companyModalCNPJ}
+                    onModalClose={() => {
+                        setOpenCompanyModal(false);
+                        setCompanyModalCNPJ('');
+                        setOnCompanyCreatedCallback(undefined);
+                    }}
+                    onCompanyCreated={(company) => {
+                        if (onCompanyCreatedCallback) {
+                            onCompanyCreatedCallback(company);
+                        }
+                        setOpenCompanyModal(false);
+                        setCompanyModalCNPJ('');
+                        setOnCompanyCreatedCallback(undefined);
+                        setPage('new-ticket');
+                    }}
+                />;
             case 'users':
                 return <UserManagementPage key="users" setPage={setPage} />;
+            case 'equipments':
+                return <EquipmentManagement key="equipments" setPage={setPage} />;
             case 'profile':
                 return <ProfilePage key="profile" setPage={setPage} />;
             case 'settings':
@@ -147,6 +179,16 @@ export const AppLayout: React.FC = () => {
                                         </button>
                                     )}
                                 </>
+                            )}
+                            {(profile?.role === 'admin' || profile?.role === 'tecnico') && page !== 'equipments' && (
+                                <button
+                                    onClick={() => setPage('equipments')}
+                                    className="mr-4 flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:text-indigo-600 hover:bg-gray-100 transition-colors"
+                                    title="Gerenciar Equipamentos"
+                                >
+                                    <Wrench className="h-5 w-5 mr-1" />
+                                    Equipamentos
+                                </button>
                             )}
                             {page !== 'profile' && (
                                 <button

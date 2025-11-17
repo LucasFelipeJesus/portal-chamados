@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ShieldCheck, LogIn, Mail, User as UserIcon, RefreshCw, AlertCircle, CheckCircle } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { Input } from '../components/ui/Input';
@@ -13,7 +13,18 @@ export const LoginPage: React.FC = () => {
     const [clearing, setClearing] = useState(false);
     const [portalName, setPortalName] = useState('Portal de Chamados');
     const [logoUrl, setLogoUrl] = useState<string | null>(null);
+    const [renderKey, setRenderKey] = useState(0); // Forçar re-renderização
     const { signIn } = useAuth();
+
+    // Log para debug - ver quando o componente renderiza
+    console.log('🎨 [Login] Renderizando componente. Estado atual:', { error, loading });
+
+    // Monitor de mudanças no estado de erro
+    useEffect(() => {
+        if (error) {
+            console.log('🔴 [Login] Estado de erro atualizado:', error);
+        }
+    }, [error]);
 
     // Buscar configurações do sistema
     useEffect(() => {
@@ -44,19 +55,28 @@ export const LoginPage: React.FC = () => {
         setError(null);
         setLoading(true);
 
+        console.log('🔐 [Login] Tentando fazer login com:', email);
+
         try {
             const errorMessage = await signIn(email, password);
 
+            console.log('📨 [Login] Resposta do signIn:', errorMessage);
+
             if (errorMessage) {
+                console.log('❌ [Login] Definindo erro:', errorMessage);
                 setError(errorMessage);
                 setLoading(false);
+                // Forçar re-renderização para garantir que o erro apareça
+                setRenderKey(prev => prev + 1);
             } else {
+                console.log('✅ [Login] Login bem-sucedido!');
                 setTimeout(() => setLoading(false), 500);
             }
         } catch (err) {
-            console.error('Erro ao fazer login:', err);
+            console.error('💥 [Login] Erro ao fazer login:', err);
             setError('Erro inesperado. Tente novamente.');
             setLoading(false);
+            setRenderKey(prev => prev + 1);
         }
     };
 
@@ -121,7 +141,7 @@ export const LoginPage: React.FC = () => {
                         autoComplete="current-password"
                     />
                     {error && (
-                        <div className={`rounded-lg p-4 flex items-start space-x-3 ${error.includes('sucesso')
+                        <div key={renderKey} className={`rounded-lg p-4 flex items-start space-x-3 ${error.includes('sucesso')
                             ? 'bg-green-50 border border-green-200'
                             : 'bg-red-50 border border-red-200'
                             }`}>

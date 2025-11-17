@@ -19,13 +19,17 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ setPage }) => {
     const [error, setError] = useState<string | null>(null);
     const [exporting, setExporting] = useState(false);
 
+    // Listas para dropdowns
+    const [companies, setCompanies] = useState<Array<{ id: string; name: string; cnpj: string }>>([]);
+    const [users, setUsers] = useState<Array<{ id: string; full_name: string; email: string }>>([]);
+
     // Filtros
     const [filterStatus, setFilterStatus] = useState<TicketStatus | 'all'>('all');
     const [filterDateStart, setFilterDateStart] = useState('');
     const [filterDateEnd, setFilterDateEnd] = useState('');
     const [filterEquipmentManufacturer, setFilterEquipmentManufacturer] = useState('');
-    const [filterCompany, setFilterCompany] = useState('');
-    const [filterUser, setFilterUser] = useState('');
+    const [filterCompany, setFilterCompany] = useState('all');
+    const [filterUser, setFilterUser] = useState('all');
 
     useEffect(() => {
         const fetchTickets = async () => {
@@ -102,6 +106,31 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ setPage }) => {
                     setTickets([]);
                     setFilteredTickets([]);
                 }
+
+                // Buscar todas as empresas para o dropdown
+                console.log('📋 [Reports] Buscando todas as empresas...');
+                const { data: allCompanies } = await client
+                    .from('companies')
+                    .select('id, name, cnpj')
+                    .order('name');
+                
+                if (allCompanies) {
+                    console.log('✅ [Reports] Empresas para dropdown:', allCompanies.length);
+                    setCompanies(allCompanies);
+                }
+
+                // Buscar todos os usuários para o dropdown
+                console.log('👥 [Reports] Buscando todos os usuários...');
+                const { data: allUsers } = await client
+                    .from('user_profiles')
+                    .select('id, full_name, email')
+                    .order('full_name');
+                
+                if (allUsers) {
+                    console.log('✅ [Reports] Usuários para dropdown:', allUsers.length);
+                    setUsers(allUsers);
+                }
+
             } catch (err) {
                 console.error('💥 [Reports] Erro:', err);
                 setError(err instanceof Error ? err.message : 'Erro inesperado');
@@ -143,19 +172,13 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ setPage }) => {
         }
 
         // Filtro por empresa
-        if (filterCompany) {
-            filtered = filtered.filter(t =>
-                t.company?.name.toLowerCase().includes(filterCompany.toLowerCase()) ||
-                t.company?.cnpj.includes(filterCompany)
-            );
+        if (filterCompany && filterCompany !== 'all') {
+            filtered = filtered.filter(t => t.company_id === filterCompany);
         }
 
         // Filtro por usuário
-        if (filterUser) {
-            filtered = filtered.filter(t =>
-                t.client?.full_name.toLowerCase().includes(filterUser.toLowerCase()) ||
-                t.client?.email.toLowerCase().includes(filterUser.toLowerCase())
-            );
+        if (filterUser && filterUser !== 'all') {
+            filtered = filtered.filter(t => t.client_id === filterUser);
         }
 
         setFilteredTickets(filtered);
@@ -166,8 +189,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ setPage }) => {
         setFilterDateStart('');
         setFilterDateEnd('');
         setFilterEquipmentManufacturer('');
-        setFilterCompany('');
-        setFilterUser('');
+        setFilterCompany('all');
+        setFilterUser('all');
     };
 
     const handleExportPDF = async () => {
@@ -200,12 +223,14 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ setPage }) => {
                 doc.text(`Data Fim: ${new Date(filterDateEnd).toLocaleDateString('pt-BR')}`, 14, yPos);
                 yPos += 5;
             }
-            if (filterCompany) {
-                doc.text(`Filtro de Empresa: ${filterCompany}`, 14, yPos);
+            if (filterCompany && filterCompany !== 'all') {
+                const companyName = companies.find(c => c.id === filterCompany)?.name || filterCompany;
+                doc.text(`Filtro de Empresa: ${companyName}`, 14, yPos);
                 yPos += 5;
             }
-            if (filterUser) {
-                doc.text(`Filtro de Usuário: ${filterUser}`, 14, yPos);
+            if (filterUser && filterUser !== 'all') {
+                const userName = users.find(u => u.id === filterUser)?.full_name || filterUser;
+                doc.text(`Filtro de Usuário: ${userName}`, 14, yPos);
                 yPos += 5;
             }
 
@@ -248,24 +273,26 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ setPage }) => {
                 ticket.client?.full_name || '-',
                 ticket.equipment_manufacturer,
                 ticket.equipment_model,
+                ticket.equipment_serial_number || '-',
                 ticket.status.replace('_', ' ')
             ]);
 
             autoTable(doc, {
                 startY: yPos,
-                head: [['#', 'Data', 'Empresa', 'Usuário', 'Fabricante', 'Modelo', 'Status']],
+                head: [['#', 'Data', 'Empresa', 'Usuário', 'Fabricante', 'Modelo', 'N° Série', 'Status']],
                 body: tableData,
                 theme: 'striped',
                 headStyles: { fillColor: [59, 130, 246] },
                 styles: { fontSize: 7 },
                 columnStyles: {
-                    0: { cellWidth: 12 },
-                    1: { cellWidth: 22 },
-                    2: { cellWidth: 30 },
-                    3: { cellWidth: 28 },
-                    4: { cellWidth: 28 },
-                    5: { cellWidth: 28 },
-                    6: { cellWidth: 'auto' }
+                    0: { cellWidth: 10 },
+                    1: { cellWidth: 20 },
+                    2: { cellWidth: 28 },
+                    3: { cellWidth: 25 },
+                    4: { cellWidth: 24 },
+                    5: { cellWidth: 24 },
+                    6: { cellWidth: 22 },
+                    7: { cellWidth: 'auto' }
                 }
             });
 
@@ -387,21 +414,33 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ setPage }) => {
                         placeholder="Ex: DIMEP"
                     />
 
-                    <Input
+                    <Select
                         id="filterCompany"
                         label="Empresa"
                         value={filterCompany}
                         onChange={(e) => setFilterCompany(e.target.value)}
-                        placeholder="Nome ou CNPJ"
-                    />
+                    >
+                        <option value="all">Todas as empresas</option>
+                        {companies.map((company) => (
+                            <option key={company.id} value={company.id}>
+                                {company.name} - {company.cnpj}
+                            </option>
+                        ))}
+                    </Select>
 
-                    <Input
+                    <Select
                         id="filterUser"
                         label="Usuário"
                         value={filterUser}
                         onChange={(e) => setFilterUser(e.target.value)}
-                        placeholder="Nome ou e-mail"
-                    />
+                    >
+                        <option value="all">Todos os usuários</option>
+                        {users.map((user) => (
+                            <option key={user.id} value={user.id}>
+                                {user.full_name} ({user.email})
+                            </option>
+                        ))}
+                    </Select>
                 </div>
 
                 <div className="flex flex-wrap gap-3 mt-6 items-center">

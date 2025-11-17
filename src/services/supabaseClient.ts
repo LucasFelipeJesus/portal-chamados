@@ -58,17 +58,3 @@ export const supabaseAdmin = SUPABASE_SERVICE_ROLE_KEY
         }
     })
     : null;
-
-// Helper function para queries com timeout
-export const queryWithTimeout = async<T>(
-    queryFn: () => Promise<T>,
-    timeoutMs: number = 8000,
-    errorMessage: string = 'Query timeout'
-): Promise<T> => {
-    const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(errorMessage)), timeoutMs)
-        );
-
-        return Promise.race([queryFn(), timeoutPromise]);
-};
-

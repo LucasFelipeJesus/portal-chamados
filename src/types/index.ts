@@ -105,4 +105,4 @@ export interface AuthContextType {
 }
 
 // Simulação de roteamento
-export type Page = 'dashboard' | 'new-ticket' | 'ticket-detail' | 'reports' | 'companies' | 'users' | 'profile' | 'admin' | 'settings';
+export type Page = 'dashboard' | 'new-ticket' | 'ticket-detail' | 'reports' | 'companies' | 'users' | 'equipments' | 'profile' | 'admin' | 'settings';

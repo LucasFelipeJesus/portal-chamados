@@ -13,11 +13,12 @@ import { FormSection } from '../components/FormSection';
 
 interface NewTicketPageProps {
     setPage: (page: Page) => void;
+    onOpenCompanyModal: (cnpj: string, onCreated?: (company: Company) => void) => void;
 }
 
 type WizardStep = 'cnpj-search' | 'equipment-selection' | 'ticket-form';
 
-export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage }) => {
+export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage, onOpenCompanyModal }) => {
     const { profile } = useAuth();
 
     // Controle das etapas do wizard
@@ -75,6 +76,75 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage }) => {
 
     // Estado para endereço de atendimento
     const [useCompanyAddress, setUseCompanyAddress] = useState<boolean | null>(null);
+
+    // Função para resetar todos os estados
+    const resetForm = () => {
+        setCurrentStep('cnpj-search');
+        setSelectedCompany(null);
+        setSelectedEquipment(null);
+        setCNPJ('');
+        setCNPJLoading(false);
+        setCNPJError(null);
+        setEquipments([]);
+        setEquipmentsLoading(false);
+        setShowNewEquipmentForm(false);
+        setNewEquipment({
+            manufacturer: '',
+            model: '',
+            serial_number: '',
+            installation_location: '',
+            internal_location: '',
+            application_type: '',
+            tecnology: '',
+            cep: ''
+        });
+        setEquipmentCepLoading(false);
+        setFormData({
+            manufacturer: '',
+            model: '',
+            application_type: '',
+            problem_description: '',
+            card_type: '',
+            previous_procedures: '',
+            address_cep: '',
+            full_address: '',
+            internal_location: '',
+            integration_needed: false,
+            integration_requirements: '',
+            contact_name: profile?.full_name || '',
+            contact_email: profile?.email || '',
+            contact_phone: '',
+            company_cnpj: ''
+        });
+        setIsSubmitting(false);
+        setCepLoading(false);
+        setUseCompanyAddress(null);
+        setError(null);
+    };
+
+    // ==================== FUNÇÕES AUXILIARES ====================
+
+    const loadEquipments = async (company: Company) => {
+        console.log('📥 Carregando equipamentos para empresa:', company.name);
+        setEquipmentsLoading(true);
+        try {
+            const { data, error } = await supabase
+                .from('equipments')
+                .select('*')
+                .eq('company_id', company.id);
+
+            if (error) throw error;
+
+            setEquipments(data || []);
+            setCurrentStep('equipment-selection');
+            console.log('✅ Equipamentos carregados:', data?.length);
+        } catch (error: any) {
+            console.error('❌ Erro ao carregar equipamentos:', error);
+            alert(`Erro ao carregar equipamentos: ${error.message}`);
+        } finally {
+            setEquipmentsLoading(false);
+        }
+    };
 
     // ==================== ETAPA 1: BUSCA DE CNPJ ====================
 
@@ -145,32 +215,7 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage }) => {
 
     const handleCNPJConfirm = async () => {
         if (!selectedCompany) return;
-
-        // Buscar equipamentos da empresa
-        setEquipmentsLoading(true);
-
-        console.log('🔍 Buscando equipamentos para company_id:', selectedCompany.id);
-        console.log('📋 Empresas do usuário:', {
-            principal: profile?.company_id,
-            adicionais: profile?.additional_company_ids
-        });
-
-        const { data, error } = await supabase
-            .from('equipments')
-            .select('*')
-            .eq('company_id', selectedCompany.id)
-            .order('created_at', { ascending: false });
-
-        setEquipmentsLoading(false);
-
-        if (error) {
-            console.error('❌ Erro ao buscar equipamentos:', error);
-        } else {
-            console.log('✅ Equipamentos encontrados:', data?.length || 0);
-            setEquipments(data || []);
-        }
-
-        setCurrentStep('equipment-selection');
+        await loadEquipments(selectedCompany);
     };
 
     // ==================== ETAPA 2: SELEÇÃO/CADASTRO DE EQUIPAMENTO ====================
@@ -402,8 +447,10 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage }) => {
                     ticketId: ticketId,
                     clientName: profile.full_name,
                     clientEmail: profile.email,
+                    clientPhone: profile.phone,
                     companyName: selectedCompany.name,
                     equipmentInfo: equipmentInfo,
+                    serialNumber: formData.serial_number,
                     problemDescription: formData.problem_description,
                     contactName: formData.contact_name,
                     contactEmail: formData.contact_email,
@@ -430,6 +477,9 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage }) => {
                 `   • Responsável local: ${formData.contact_name} (${formData.contact_email})\n` +
                 `   • Administradores: ${adminEmails.length} pessoa(s)`
             );
+
+            // Resetar o formulário antes de voltar ao dashboard
+            resetForm();
             setPage('dashboard');
         }
     };
@@ -512,11 +562,30 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage }) => {
                     </div>
 
                     {cnpjError && (
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start">
-                            <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 mr-3 flex-shrink-0" />
-                            <div>
-                                <p className="text-sm font-medium text-red-900">Erro na busca</p>
-                                <p className="text-sm text-red-700 mt-1">{cnpjError}</p>
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                            <div className="flex items-start">
+                                <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 mr-3 flex-shrink-0" />
+                                <div className="flex-1">
+                                    <p className="text-sm font-medium text-red-900">Erro na busca</p>
+                                    <p className="text-sm text-red-700 mt-1">{cnpjError}</p>
+
+                                    {/* Botão para cadastrar empresa (apenas admin) */}
+                                    {cnpjError.includes('não encontrado') && profile?.role === 'admin' && (
+                                        <button
+                                            type="button"
+                                            onClick={() => onOpenCompanyModal(cnpj, async (company: Company) => {
+                                                console.log('✅ Empresa criada recebida:', company);
+                                                setSelectedCompany(company);
+                                                setCNPJError(null);
+                                                await loadEquipments(company);
+                                            })}
+                                            className="mt-3 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                                        >
+                                            <Building2 className="h-4 w-4" />
+                                            Cadastrar esta empresa
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     )}
@@ -940,7 +1009,7 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage }) => {
                                             � Importante: Envie também um vídeo do problema!
                                         </p>
                                         <p className="text-sm text-gray-700 mb-2">
-                                            Se possível, grave um vídeo mostrando o problema e envie para um dos nossos telefones WhatsApp:
+                                            Se possível, grave um vídeo mostrando o problema e envie para um dos nossos telefones WhatsApp mencionando o número do chamado que você está abrindo assim como nome da empresa:
                                         </p>
                                         <div className="flex flex-wrap gap-3 mt-3">
                                             <a
@@ -1060,6 +1129,22 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage }) => {
                             {/* Mostra campos para editar apenas se escolheu "Não" ou não tem endereço cadastrado */}
                             {(useCompanyAddress === false || !selectedCompany?.full_address) && (
                                 <>
+                                    {useCompanyAddress === false && selectedCompany?.full_address && (
+                                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                                            <div className="flex items-center justify-between">
+                                                <p className="text-sm text-blue-900">
+                                                    Você optou por informar outro endereço
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setUseCompanyAddress(null)}
+                                                    className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                                                >
+                                                    ← Voltar
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
                                     <div className="relative">
                                         <Input
                                             id="address_cep"
@@ -1242,6 +1327,7 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage }) => {
             {currentStep === 'cnpj-search' && renderCNPJSearch()}
             {currentStep === 'equipment-selection' && renderEquipmentSelection()}
             {currentStep === 'ticket-form' && renderTicketForm()}
+
         </div>
     );
 };

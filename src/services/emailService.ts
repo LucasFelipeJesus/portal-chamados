@@ -1,5 +1,5 @@
 // src/services/emailService.ts
-// Serviço de envio de emails usando Resend API
+// Serviço de envio de emails usando Gmail SMTP via Supabase Edge Function
 
 interface EmailOptions {
     to: string | string[];
@@ -11,8 +11,10 @@ interface TicketCreatedEmailData {
     ticketId: number;
     clientName: string;
     clientEmail: string;
+    clientPhone?: string;
     companyName: string;
     equipmentInfo: string;
+    serialNumber?: string;
     problemDescription: string;
     contactName: string;
     contactEmail: string;
@@ -31,60 +33,73 @@ interface CommentNotificationData {
 }
 
 class EmailService {
-    private apiKey: string;
-    private fromEmail: string;
-    private apiUrl = 'https://api.resend.com/emails';
+    private supabaseUrl: string;
+    private supabaseAnonKey: string;
+    private edgeFunctionUrl: string;
 
     constructor() {
         // Busca as configurações do .env
-        this.apiKey = import.meta.env.VITE_RESEND_API_KEY || '';
-        this.fromEmail = import.meta.env.VITE_RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+        this.supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+        this.supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+        this.edgeFunctionUrl = `${this.supabaseUrl}/functions/v1/send-email-gmail`;
 
-        if (!this.apiKey) {
-            console.warn('⚠️ VITE_RESEND_API_KEY não configurado. Emails serão apenas logados no console.');
+        if (!this.supabaseUrl || !this.supabaseAnonKey) {
+            console.warn('⚠️ Variáveis Supabase não configuradas.');
         }
     }
 
     /**
-     * Envia um email usando a API do Resend
+     * Envia um email através da Supabase Edge Function (evita CORS)
      */
     private async sendEmail(options: EmailOptions): Promise<boolean> {
-        // Se não tiver API key, apenas loga no console (modo desenvolvimento)
-        if (!this.apiKey) {
-            console.log('📧 [EMAIL - DEV MODE] Email que seria enviado:', {
-                to: options.to,
-                subject: options.subject,
-                htmlPreview: options.html.substring(0, 300) + '...'
-            });
-            return true;
-        }
-
         try {
-            const response = await fetch(this.apiUrl, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.apiKey}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    from: this.fromEmail,
-                    to: Array.isArray(options.to) ? options.to : [options.to],
-                    subject: options.subject,
-                    html: options.html,
-                }),
-            });
+            const recipients = Array.isArray(options.to) ? options.to : [options.to];
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                console.error('❌ Erro ao enviar email:', errorData);
-                return false;
+            // Envia para cada destinatário com delay para evitar rate limit
+            for (let i = 0;i < recipients.length;i++) {
+                const to = recipients[i];
+
+                // Delay de 1 segundo entre emails (exceto o primeiro)
+                if (i > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                console.log(`📧 Enviando email para: ${to}`);
+
+                const response = await fetch(this.edgeFunctionUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${this.supabaseAnonKey}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        to,
+                        subject: options.subject,
+                        html: options.html,
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    console.error(`❌ Erro ao enviar email para ${to}:`, data);
+
+                    // Se for erro 429 (rate limit), continua tentando os próximos
+                    if (response.status === 429) {
+                        console.warn(`⚠️ Rate limit atingido para ${to}. Aguardando 3 segundos...`);
+                        await new Promise(resolve => setTimeout(resolve, 3000));
+                        continue;
+                    }
+
+                    return false;
+                }
+
+                console.log(`✅ Email enviado com sucesso para ${to}:`, data);
             }
 
-            const data = await response.json();
-            console.log('✅ Email enviado com sucesso:', data.id);
             return true;
         } catch (error) {
-            console.error('❌ Erro na chamada da API de email:', error);
+            console.error('❌ Erro na chamada da Edge Function:', error);
             return false;
         }
     }
@@ -241,6 +256,10 @@ class EmailService {
                         <span class="info-label">Equipamento:</span>
                         <span class="info-value">${data.equipmentInfo}</span>
                     </div>
+                    ${data.serialNumber ? `<div class="info-row">
+                        <span class="info-label">Número de Série:</span>
+                        <span class="info-value">${data.serialNumber}</span>
+                    </div>` : ''}
                     <div class="info-row">
                         <span class="info-label">Localização:</span>
                         <span class="info-value">${data.internalLocation}</span>
@@ -306,6 +325,10 @@ class EmailService {
                         <span class="info-label">Equipamento:</span>
                         <span class="info-value">${data.equipmentInfo}</span>
                     </div>
+                    ${data.serialNumber ? `<div class="info-row">
+                        <span class="info-label">Número de Série:</span>
+                        <span class="info-value">${data.serialNumber}</span>
+                    </div>` : ''}
                     <div class="info-row">
                         <span class="info-label">Localização Interna:</span>
                         <span class="info-value">${data.internalLocation}</span>
@@ -329,6 +352,22 @@ class EmailService {
                         • Acompanhar o atendimento<br>
                         • Validar a solução do problema
                     </p>
+                </div>
+
+                <div class="info-box">
+                    <p style="margin: 0 0 10px 0;"><strong>👤 Dados do Requisitante:</strong></p>
+                    <div class="info-row">
+                        <span class="info-label">Nome:</span>
+                        <span class="info-value">${data.clientName}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Email:</span>
+                        <span class="info-value">${data.clientEmail}</span>
+                    </div>
+                    ${data.clientPhone ? `<div class="info-row">
+                        <span class="info-label">Telefone:</span>
+                        <span class="info-value">${data.clientPhone}</span>
+                    </div>` : ''}
                 </div>
 
                 <p style="margin-top: 20px;">
@@ -426,31 +465,36 @@ class EmailService {
             </div>
         `;
 
-        // Enviar email para o cliente
+        // 📧 MODO PRODUÇÃO: Gmail SMTP - Envia para destinatários reais
+
+        // Email 1: Para o cliente
+        console.log(`📧 Enviando email de confirmação para o cliente (${data.clientEmail})...`);
         const clientEmailSent = await this.sendEmail({
             to: data.clientEmail,
             subject: `✅ Chamado #${data.ticketId} Criado - ${data.companyName}`,
             html: this.getEmailTemplate(clientEmailContent)
         });
 
-        // Enviar email para o responsável local
+        // Email 2: Para o responsável local
+        console.log(`📧 Enviando email para o responsável local (${data.contactEmail})...`);
         const contactEmailSent = await this.sendEmail({
             to: data.contactEmail,
             subject: `🔔 Novo Chamado #${data.ticketId} - Você é o Responsável Local - ${data.companyName}`,
             html: this.getEmailTemplate(contactEmailContent)
         });
 
-        // Enviar email para os administradores (se houver)
+        // Email 3: Para os administradores (se houver)
         let adminEmailsSent = true;
         if (adminEmails && adminEmails.length > 0) {
             console.log(`📧 Enviando notificação para ${adminEmails.length} administrador(es)...`);
             adminEmailsSent = await this.sendEmail({
                 to: adminEmails,
-                subject: `🚨 Novo Chamado #${data.ticketId} - ${data.companyName} - Ação Necessária`,
+                subject: `🚨 NOVO Chamado #${data.ticketId} Aberto - Ação Necessária - ${data.companyName}`,
                 html: this.getEmailTemplate(adminEmailContent)
             });
         }
 
+        console.log(`✅ Emails enviados com sucesso (cliente + responsável + admins)`);
         return clientEmailSent && contactEmailSent && adminEmailsSent;
     }
 

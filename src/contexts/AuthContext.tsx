@@ -150,33 +150,41 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     const signIn = async (email: string, password: string) => {
+        console.log('🔐 [AuthContext] signIn chamado para:', email);
         setLoading(true);
 
         try {
+            console.log('📤 [AuthContext] Enviando credenciais para Supabase...');
             const { error } = await supabase.auth.signInWithPassword({
                 email: email.trim(),
                 password
             });
 
+            console.log('📥 [AuthContext] Resposta do Supabase:', { error });
+
             if (error) {
-                console.error('Erro no login:', error.message);
+                console.error('❌ [AuthContext] Erro no login:', error.message);
                 setLoading(false);
 
                 // Mensagens de erro mais amigáveis
                 if (error.message.includes('Invalid login credentials')) {
+                    console.log('🔴 [AuthContext] Retornando: Email ou senha incorretos');
                     return 'Email ou senha incorretos';
                 }
                 if (error.message.includes('Email not confirmed')) {
+                    console.log('🔴 [AuthContext] Retornando: Email não confirmado');
                     return 'Por favor, confirme seu email antes de fazer login';
                 }
+                console.log('🔴 [AuthContext] Retornando erro original:', error.message);
                 return error.message;
             }
 
             // O fetchProfile será chamado pelo listener onAuthStateChange
+            console.log('✅ [AuthContext] Login bem-sucedido, retornando null');
             setLoading(false);
             return null;
         } catch (err) {
-            console.error('Erro inesperado no login:', err);
+            console.error('💥 [AuthContext] Erro inesperado no login:', err);
             setLoading(false);
             return 'Erro inesperado ao fazer login. Tente novamente.';
         }

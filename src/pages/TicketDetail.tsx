@@ -61,6 +61,7 @@ export const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketId, se
             if (fetchError) {
                 console.error('Erro ao buscar comentários:', fetchError);
             } else {
+                console.log('📋 Comentários carregados:', data);
                 setComments(data || []);
             }
             setLoadingComments(false);
@@ -97,6 +98,7 @@ export const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketId, se
             alert(`Erro ao adicionar comentário: ${insertError.message}`);
         } else {
             console.log('✅ Comentário adicionado:', data);
+            console.log('👤 Dados do usuário no comentário:', data?.user);
             setComments(prev => [...prev, data]);
             setNewComment('');
             setIsInternalComment(false);
@@ -506,6 +508,7 @@ export const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketId, se
                         <div className="border-t pt-4">
                             <div className="space-y-3">
                                 <Textarea
+                                    label="Novo comentário"
                                     value={newComment}
                                     onChange={(e) => setNewComment(e.target.value)}
                                     placeholder="Adicione um comentário..."

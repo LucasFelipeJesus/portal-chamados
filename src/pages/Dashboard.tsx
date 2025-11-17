@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'; // <--- IMPORTAÇÃO PRINCIPAL FALTANTE
-import { PlusCircle, ArrowRight, Loader2 } from 'lucide-react'; // <--- ÍCONES FALTANTES
+import { PlusCircle, ArrowRight, Loader2, Trash2 } from 'lucide-react'; // <--- ÍCONES FALTANTES
 import { useAuth } from '../hooks/useAuth';
 import { Button } from '../components/ui/Button';
 import type { Ticket, TicketStatus, Page } from '../types';
@@ -20,6 +20,44 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ setPage, onViewTic
     const [tickets, setTickets] = useState<Ticket[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [deleting, setDeleting] = useState<number | null>(null);
+
+    // Função para deletar chamado (apenas admin)
+    const handleDelete = async (ticketId: number, e: React.MouseEvent) => {
+        e.stopPropagation(); // Evita abrir o ticket ao clicar no botão de deletar
+        
+        if (profile?.role !== 'admin') {
+            alert('❌ Apenas administradores podem deletar chamados!');
+            return;
+        }
+
+        const confirmDelete = confirm(
+            `Tem certeza que deseja deletar o chamado #${ticketId}?\n\nEsta ação não pode ser desfeita.`
+        );
+
+        if (!confirmDelete) return;
+
+        setDeleting(ticketId);
+        try {
+            const client = supabaseAdmin || supabase;
+            
+            const { error: deleteError } = await client
+                .from('tickets')
+                .delete()
+                .eq('id', ticketId);
+
+            if (deleteError) throw deleteError;
+
+            // Remover o ticket da lista local
+            setTickets(tickets.filter(t => t.id !== ticketId));
+            alert('✅ Chamado deletado com sucesso!');
+        } catch (error) {
+            console.error('❌ Erro ao deletar chamado:', error);
+            alert(`❌ Erro ao deletar chamado: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+        } finally {
+            setDeleting(null);
+        }
+    };
 
     // useEffect para buscar os dados quando o componente montar
     useEffect(() => {
@@ -180,14 +218,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ setPage, onViewTic
                         });
 
                         return (
-                            <li key={ticket.id} className="p-4 hover:bg-gray-50 cursor-pointer" onClick={() => onViewTicket(ticket.id)}>
+                            <li key={ticket.id} className="p-4 hover:bg-gray-50 transition-colors">
                                 <div className="flex items-center space-x-4">
                                     <div className="flex-shrink-0">
                                         <span className={`px-2.5 py-0.5 rounded-full text-sm font-medium ${getStatusBadge(ticket.status)} capitalize`}>
                                             {ticket.status.replace('_', ' ')}
                                         </span>
                                     </div>
-                                    <div className="flex-1 min-w-0">
+                                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onViewTicket(ticket.id)}>
                                         <p className="text-sm font-medium text-blue-600 truncate">
                                             Chamado #{ticket.id} - {ticket.equipment_manufacturer} {ticket.equipment_model}
                                         </p>
@@ -213,7 +251,29 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ setPage, onViewTic
                                             {new Date(ticket.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                                         </p>
                                     </div>
-                                    <ArrowRight className="h-5 w-5 text-gray-400" />
+                                    <div className="flex items-center gap-2">
+                                        {profile?.role === 'admin' && (
+                                            <button
+                                                onClick={(e) => handleDelete(ticket.id, e)}
+                                                disabled={deleting === ticket.id}
+                                                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                title="Deletar chamado"
+                                            >
+                                                {deleting === ticket.id ? (
+                                                    <Loader2 className="h-5 w-5 animate-spin" />
+                                                ) : (
+                                                    <Trash2 className="h-5 w-5" />
+                                                )}
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={() => onViewTicket(ticket.id)}
+                                            className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors"
+                                            title="Ver detalhes"
+                                        >
+                                            <ArrowRight className="h-5 w-5" />
+                                        </button>
+                                    </div>
                                 </div>
                             </li>
                         );
