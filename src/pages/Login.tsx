@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { ShieldCheck, LogIn, Mail, User as UserIcon, RefreshCw, AlertCircle, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ShieldCheck, LogIn, Mail, User as UserIcon, AlertCircle, CheckCircle, X as XIcon } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
@@ -8,25 +8,14 @@ import { supabase } from '../services/supabaseClient';
 export const LoginPage: React.FC = () => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [error, setError] = useState<string | null>(null);
+    // local visual key to force re-create of the alert when error changes
     const [loading, setLoading] = useState(false);
-    const [clearing, setClearing] = useState(false);
+    const [errorKey, setErrorKey] = useState(0);
+    // Auth context provides cross-mount login errors
     const [portalName, setPortalName] = useState('Portal de Chamados');
     const [logoUrl, setLogoUrl] = useState<string | null>(null);
-    const [renderKey, setRenderKey] = useState(0); // Forçar re-renderização
-    const { signIn } = useAuth();
+    const { signIn, authError, clearAuthError } = useAuth();
 
-    // Log para debug - ver quando o componente renderiza
-    console.log('🎨 [Login] Renderizando componente. Estado atual:', { error, loading });
-
-    // Monitor de mudanças no estado de erro
-    useEffect(() => {
-        if (error) {
-            console.log('🔴 [Login] Estado de erro atualizado:', error);
-        }
-    }, [error]);
-
-    // Buscar configurações do sistema
     useEffect(() => {
         const fetchSettings = async () => {
             const { data: settings } = await supabase
@@ -50,9 +39,14 @@ export const LoginPage: React.FC = () => {
         fetchSettings();
     }, []);
 
+    useEffect(() => {
+        console.log('🔧 [Login] mount');
+        return () => console.log('🔧 [Login] unmount');
+    }, []);
+
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
-        setError(null);
+        console.trace('🧭 [Login] trace: iniciando signIn');
         setLoading(true);
 
         console.log('🔐 [Login] Tentando fazer login com:', email);
@@ -63,41 +57,22 @@ export const LoginPage: React.FC = () => {
             console.log('📨 [Login] Resposta do signIn:', errorMessage);
 
             if (errorMessage) {
-                console.log('❌ [Login] Definindo erro:', errorMessage);
-                setError(errorMessage);
+                console.log('❌ [Login] Erro retornado pelo signIn:', errorMessage);
+                // signIn já atualiza authError no contexto; forçamos key para re-annouce
+                setErrorKey(prev => prev + 1);
                 setLoading(false);
-                // Forçar re-renderização para garantir que o erro apareça
-                setRenderKey(prev => prev + 1);
             } else {
                 console.log('✅ [Login] Login bem-sucedido!');
                 setTimeout(() => setLoading(false), 500);
             }
         } catch (err) {
             console.error('💥 [Login] Erro ao fazer login:', err);
-            setError('Erro inesperado. Tente novamente.');
+            // Em caso de erro inesperado, apenas logamos — context/signIn deve lidar com mensagens
             setLoading(false);
-            setRenderKey(prev => prev + 1);
         }
     };
 
-    const handleClearSession = async () => {
-        setClearing(true);
-        setError(null);
-        try {
-            // Limpa sessão do Supabase
-            await supabase.auth.signOut();
-            // Limpa localStorage
-            localStorage.clear();
-            // Limpa sessionStorage
-            sessionStorage.clear();
-            setError('Sessão limpa com sucesso! Tente fazer login novamente.');
-        } catch (err) {
-            console.error('Erro ao limpar sessão:', err);
-            setError('Erro ao limpar sessão');
-        } finally {
-            setClearing(false);
-        }
-    };
+    // Nota: botão de limpar sessão removido — manutenção do fluxo de login simplificada
 
     return (
         <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
@@ -130,6 +105,7 @@ export const LoginPage: React.FC = () => {
                         required
                         autoComplete="email"
                     />
+
                     <Input
                         id="password"
                         label="Senha"
@@ -140,43 +116,49 @@ export const LoginPage: React.FC = () => {
                         required
                         autoComplete="current-password"
                     />
-                    {error && (
-                        <div key={renderKey} className={`rounded-lg p-4 flex items-start space-x-3 ${error.includes('sucesso')
+
+                    {authError && (
+                        <div key={errorKey} role="alert" aria-live="assertive" className={`rounded-lg p-4 flex items-start space-x-3 ${authError?.includes('sucesso')
                             ? 'bg-green-50 border border-green-200'
                             : 'bg-red-50 border border-red-200'
                             }`}>
-                            {error.includes('sucesso') ? (
+                            {authError?.includes('sucesso') ? (
                                 <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
                             ) : (
                                 <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
                             )}
                             <div className="flex-1">
-                                <p className={`text-sm font-medium ${error.includes('sucesso') ? 'text-green-800' : 'text-red-800'
+                                <p className={`text-sm font-medium ${authError?.includes('sucesso') ? 'text-green-800' : 'text-red-800'
                                     }`}>
-                                    {error.includes('sucesso') ? 'Sucesso!' : 'Erro no login'}
+                                    {authError?.includes('sucesso') ? 'Sucesso!' : 'Erro no login'}
                                 </p>
-                                <p className={`text-sm mt-1 ${error.includes('sucesso') ? 'text-green-700' : 'text-red-700'
+                                <p className={`text-sm mt-1 ${authError?.includes('sucesso') ? 'text-green-700' : 'text-red-700'
                                     }`}>
-                                    {error}
+                                    {authError}
                                 </p>
+                            </div>
+                            <div className="flex-shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        clearAuthError?.();
+                                        setErrorKey(0);
+                                    }}
+                                    aria-label="Fechar mensagem"
+                                    className="p-1 rounded hover:bg-gray-100"
+                                >
+                                    <XIcon className="h-4 w-4 text-gray-500" />
+                                </button>
                             </div>
                         </div>
                     )}
+
                     <div className="pt-2 space-y-2">
                         <Button type="submit" isLoading={loading}>
                             <LogIn className="h-5 w-5 mr-2" />
                             Entrar
                         </Button>
-                        <Button
-                            type="button"
-                            onClick={handleClearSession}
-                            variant="secondary"
-                            isLoading={clearing}
-                            className="text-sm"
-                        >
-                            <RefreshCw className="h-4 w-4 mr-2" />
-                            Limpar Sessão (se tiver problemas no login)
-                        </Button>
+                        {/* Botão de limpar sessão removido */}
                     </div>
                 </form>
             </div>

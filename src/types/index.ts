@@ -102,6 +102,9 @@ export interface AuthContextType {
     signIn: (email: string, pass: string) => Promise<string | null>;
     signOut: () => void;
     refreshProfile: () => Promise<void>;
+    // Erro global de autenticação (mensagem para mostrar no Login)
+    authError?: string | null;
+    clearAuthError?: () => void;
 }
 
 // Simulação de roteamento

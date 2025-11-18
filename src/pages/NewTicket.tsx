@@ -1,5 +1,5 @@
 // src/pages/NewTicket.tsx - Wizard multi-etapas
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, CheckCircle, Loader2, Building2, AlertCircle, Wrench, Plus, ArrowLeft, Mail, Phone, User } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../services/supabaseClient';
@@ -34,6 +34,8 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage, onOpenCom
     const [cnpj, setCNPJ] = useState('');
     const [cnpjLoading, setCNPJLoading] = useState(false);
     const [cnpjError, setCNPJError] = useState<string | null>(null);
+    // Lista de empresas exibida no select (clientes: vinculadas; admin/técnico: todas)
+    const [companies, setCompanies] = useState<Company[]>([]);
 
     // Estado para equipamentos (Etapa 2)
     const [equipments, setEquipments] = useState<Equipment[]>([]);
@@ -192,22 +194,29 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage, onOpenCom
 
         // Para clientes: filtrar apenas empresas vinculadas
         if (profile?.role === 'cliente') {
+            const allowedCompanyIds: string[] = [];
+
+            // Adicionar empresa principal se existir
             if (profile.company_id) {
-                // Se tem empresa principal, incluir ela
-                query = query.or(`id.eq.${profile.company_id}`);
+                allowedCompanyIds.push(profile.company_id);
             }
 
+            // Adicionar empresas adicionais se existirem
             if (profile.additional_company_ids && profile.additional_company_ids.length > 0) {
-                // Se tem empresas adicionais, incluir elas também
-                const additionalIds = profile.additional_company_ids.join(',');
-                if (profile.company_id) {
-                    query = query.or(`id.eq.${profile.company_id},id.in.(${additionalIds})`);
-                } else {
-                    query = query.or(`id.in.(${additionalIds})`);
-                }
+                allowedCompanyIds.push(...profile.additional_company_ids);
             }
 
-            console.log('🔒 Cliente - Buscando apenas empresas vinculadas');
+            if (allowedCompanyIds.length > 0) {
+                // Filtrar apenas empresas permitidas
+                query = query.in('id', allowedCompanyIds);
+                console.log('🔒 Cliente - Buscando apenas empresas vinculadas:', allowedCompanyIds);
+            } else {
+                // Cliente sem empresas vinculadas - não permitir busca
+                console.log('🚫 Cliente sem empresas vinculadas - bloqueando busca');
+                setCNPJError('Você não possui empresas vinculadas para abrir chamados.');
+                setCNPJLoading(false);
+                return;
+            }
         } else {
             // Técnicos e admins podem ver todas as empresas
             console.log('🔓 Técnico/Admin - Buscando todas as empresas');
@@ -232,7 +241,11 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage, onOpenCom
 
         if (!foundCompany) {
             console.log('❌ CNPJ não encontrado. Total de empresas:', allCompanies?.length);
-            setCNPJError('CNPJ não encontrado no sistema.');
+            if (profile?.role === 'cliente') {
+                setCNPJError('CNPJ não vinculado a este usuário. Contatar o administrador do sistema.');
+            } else {
+                setCNPJError('CNPJ não encontrado no sistema.');
+            }
             return;
         }
 
@@ -240,6 +253,44 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage, onOpenCom
         setSelectedCompany(foundCompany);
         setCNPJError(null);
     };
+
+    const loadCompanies = async () => {
+        if (!profile) return;
+
+        // Para clientes: buscar apenas empresas vinculadas; para admin/técnico: buscar todas
+        const allowedCompanyIds: string[] = [];
+        if (profile.role === 'cliente') {
+            if (profile.company_id) allowedCompanyIds.push(profile.company_id);
+            if (profile.additional_company_ids && profile.additional_company_ids.length > 0) {
+                allowedCompanyIds.push(...profile.additional_company_ids);
+            }
+        }
+
+        try {
+            let query = supabase.from('companies').select('*');
+
+            if (profile.role === 'cliente') {
+                if (allowedCompanyIds.length === 0) {
+                    setCompanies([]);
+                    return;
+                }
+                query = query.in('id', allowedCompanyIds);
+            }
+
+            const { data, error } = await query;
+            if (error) throw error;
+            setCompanies(data || []);
+        } catch (err) {
+            console.error('Erro ao carregar empresas:', err);
+            setCompanies([]);
+        }
+    };
+
+    useEffect(() => {
+        // Carrega empresas ao montar o componente
+        loadCompanies();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [profile?.id]);
 
     const handleCNPJConfirm = async () => {
         if (!selectedCompany) return;
@@ -563,6 +614,36 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage, onOpenCom
 
             <div className="bg-white rounded-lg shadow-md p-6">
                 <div className="space-y-4">
+                    {/* Mostrar select de empresas para todos os perfis (clientes verão só as vinculadas) */}
+                    {profile && (
+                        <div className="mb-4">
+                            <Select
+                                id="company_select"
+                                label="Escolha uma empresa (ou deixe em branco para digitar CNPJ)"
+                                value={selectedCompany?.id || ''}
+                                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+                                    const companyId = e.target.value;
+                                    if (!companyId) {
+                                        setSelectedCompany(null);
+                                        setCNPJ('');
+                                        return;
+                                    }
+                                    const found = companies.find(c => c.id === companyId);
+                                    if (found) {
+                                        setSelectedCompany(found);
+                                        setCNPJ(formatCNPJ(found.cnpj || ''));
+                                        setCNPJError(null);
+                                    }
+                                }}
+                            >
+                                <option value="">-- Selecione uma empresa --</option>
+                                {companies.map((company) => (
+                                    <option key={company.id} value={company.id}>{company.name} — {company.cnpj}</option>
+                                ))}
+                            </Select>
+                        </div>
+                    )}
+
                     <div className="relative">
                         <Input
                             id="cnpj"

@@ -11,6 +11,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [user, setUser] = useState<User | null>(null);
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
+    const [authError, setAuthError] = useState<string | null>(null);
 
     useEffect(() => {
         // Busca a sessão inicial
@@ -104,6 +105,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         };
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+    const clearAuthError = () => setAuthError(null);
+
     const fetchProfile = async (userId: string, forceRefresh = false): Promise<boolean> => {
         try {
             console.log('🔍 Buscando perfil para userId:', userId, forceRefresh ? '(FORÇANDO REFRESH COM BYPASS DE CACHE)' : '');
@@ -152,6 +155,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const signIn = async (email: string, password: string) => {
         console.log('🔐 [AuthContext] signIn chamado para:', email);
         setLoading(true);
+        // limpar erro anterior
+        setAuthError(null);
 
         try {
             console.log('📤 [AuthContext] Enviando credenciais para Supabase...');
@@ -169,13 +174,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 // Mensagens de erro mais amigáveis
                 if (error.message.includes('Invalid login credentials')) {
                     console.log('🔴 [AuthContext] Retornando: Email ou senha incorretos');
+                    setAuthError('Email ou senha incorretos');
                     return 'Email ou senha incorretos';
                 }
                 if (error.message.includes('Email not confirmed')) {
                     console.log('🔴 [AuthContext] Retornando: Email não confirmado');
+                    setAuthError('Por favor, confirme seu email antes de fazer login');
                     return 'Por favor, confirme seu email antes de fazer login';
                 }
                 console.log('🔴 [AuthContext] Retornando erro original:', error.message);
+                setAuthError(error.message);
                 return error.message;
             }
 
@@ -186,6 +194,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } catch (err) {
             console.error('💥 [AuthContext] Erro inesperado no login:', err);
             setLoading(false);
+            setAuthError('Erro inesperado ao fazer login. Tente novamente.');
             return 'Erro inesperado ao fazer login. Tente novamente.';
         }
     };
@@ -196,6 +205,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             // Limpa estado imediatamente (não espera Supabase)
             setUser(null);
             setProfile(null);
+            setAuthError(null);
             // Tenta fazer logout no Supabase (com timeout)
             const logoutPromise = supabase.auth.signOut();
             const timeoutPromise = new Promise((resolve) =>
@@ -226,7 +236,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     return (
-        <AuthContext.Provider value={{ user, profile, loading, signIn, signOut, refreshProfile }}>
+        <AuthContext.Provider value={{ user, profile, loading, signIn, signOut, refreshProfile, authError, clearAuthError }}>
             {children}
         </AuthContext.Provider>
     );
