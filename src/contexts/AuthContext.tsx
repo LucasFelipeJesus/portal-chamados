@@ -14,6 +14,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [authError, setAuthError] = useState<string | null>(null);
     // Ref para armazenar o userId atual e evitar closures com valor stale
     const currentUserIdRef = useRef<string | null>(null);
+    // Ref para controlar timer de inatividade
+    const idleTimeoutRef = useRef<number | null>(null);
+    // Tempo de inatividade (ms) antes do logout automático — 5 minutos
+    const IDLE_TIMEOUT = 5 * 60 * 1000;
 
     useEffect(() => {
         // Busca a sessão inicial
@@ -223,6 +227,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             );
             await Promise.race([logoutPromise, timeoutPromise]);
             console.log('✅ [Auth] Logout concluído');
+            try {
+                // Redireciona para tela de login (root). Em SPA isso também forçará
+                // a exibição do `LoginPage` caso o App baseie-se em `user`.
+                if (typeof window !== 'undefined') {
+                    window.location.href = '/';
+                }
+            } catch (err) {
+                // Não falhar o logout por erro de navegação
+                console.warn('Não foi possível redirecionar automaticamente:', err);
+            }
         } catch (error) {
             console.error('❌ [Auth] Erro ao fazer logout (ignorando):', error);
             setUser(null);
@@ -230,6 +244,70 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setProfile(null);
         }
     };
+
+    // Funções para controlar timeout de inatividade
+    const clearIdleTimer = () => {
+        if (idleTimeoutRef.current) {
+            window.clearTimeout(idleTimeoutRef.current);
+            idleTimeoutRef.current = null;
+        }
+    };
+
+    const startIdleTimer = () => {
+        clearIdleTimer();
+        if (!user) return;
+        // eslint-disable-next-line @typescript-eslint/no-misused-promises
+        idleTimeoutRef.current = window.setTimeout(async () => {
+            try {
+                console.log('🔒 Inatividade detectada — efetuando logout automático');
+                await signOut();
+            } catch (err) {
+                console.error('Erro no logout por inatividade:', err);
+            }
+        }, IDLE_TIMEOUT) as unknown as number;
+    };
+
+    // Adiciona listeners de atividade do usuário e listener de fechamento da aba
+    useEffect(() => {
+        // Só ativa quando houver um usuário logado
+        if (!user) {
+            clearIdleTimer();
+            return;
+        }
+
+        const activityEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+
+        const onActivity = () => {
+            startIdleTimer();
+        };
+
+        for (const ev of activityEvents) {
+            window.addEventListener(ev, onActivity, { passive: true });
+        }
+
+        const onBeforeUnload = () => {
+            try {
+                console.log('⚠️ beforeunload - tentando logout rápido');
+                // Tenta informar o servidor; não aguardamos pois o browser pode cancelar
+                void supabase.auth.signOut();
+            } catch (err) {
+                // ignore
+            }
+        };
+
+        window.addEventListener('beforeunload', onBeforeUnload);
+
+        // inicia o timer ao montar
+        startIdleTimer();
+
+        return () => {
+            clearIdleTimer();
+            for (const ev of activityEvents) {
+                window.removeEventListener(ev, onActivity);
+            }
+            window.removeEventListener('beforeunload', onBeforeUnload);
+        };
+    }, [user]); // reconfigura quando usuário muda
 
     const refreshProfile = async () => {
         if (user?.id) {

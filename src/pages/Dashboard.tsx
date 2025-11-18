@@ -80,7 +80,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ setPage, onViewTic
                     .order('created_at', { ascending: false });
 
                 const timeoutPromise = new Promise<never>((_, reject) =>
-                    setTimeout(() => reject(new Error('⏱️ Timeout: A consulta de tickets demorou mais de 10 segundos')), 10000)
+                    setTimeout(() => reject(new Error('⏱️ Timeout: A consulta de tickets demorou mais de 20 segundos, recarregue a página!')), 20000)
                 );
 
                 const { data, error: fetchError } = await Promise.race([

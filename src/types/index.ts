@@ -75,6 +75,7 @@ export interface Ticket {
     status: TicketStatus;
     equipment_manufacturer: string;
     equipment_model: string;
+    equipment_serial_number?: string;
     application_type: 'Acesso' | 'Ponto';
     internal_location: string;
     form_data: TicketFormData;
