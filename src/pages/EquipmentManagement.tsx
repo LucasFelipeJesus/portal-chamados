@@ -396,7 +396,12 @@ export const EquipmentManagement: React.FC<EquipmentManagementProps> = ({ setPag
                             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         />
                     </div>
+                    <label htmlFor="company-select" className="sr-only">
+                        Empresa
+                    </label>
                     <select
+                        id="company-select"
+                        aria-label="Empresa"
                         value={selectedCompany}
                         onChange={(e) => setSelectedCompany(e.target.value)}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -519,6 +524,7 @@ export const EquipmentManagement: React.FC<EquipmentManagementProps> = ({ setPag
                                 <button
                                     onClick={handleCloseModal}
                                     className="text-gray-400 hover:text-gray-600"
+                                    aria-label="Fechar modal"
                                 >
                                     <X className="h-6 w-6" />
                                 </button>
@@ -572,6 +578,7 @@ export const EquipmentManagement: React.FC<EquipmentManagementProps> = ({ setPag
                                                 </div>
                                                 <button
                                                     type="button"
+                                                        title="Voltar para lista de fabricantes"
                                                     onClick={() => {
                                                         setUseCustomManufacturer(false);
                                                         setFormData({ ...formData, manufacturer: '', model: '' });
@@ -622,6 +629,7 @@ export const EquipmentManagement: React.FC<EquipmentManagementProps> = ({ setPag
                                                 {availableModels.length > 0 && (
                                                     <button
                                                         type="button"
+                                                            title="Voltar para lista de modelos"
                                                         onClick={() => {
                                                             setUseCustomModel(false);
                                                             setFormData({ ...formData, model: '' });

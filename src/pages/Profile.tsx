@@ -11,7 +11,7 @@ interface ProfilePageProps {
 }
 
 export const ProfilePage: React.FC<ProfilePageProps> = ({ setPage }) => {
-    const { profile, user } = useAuth();
+    const { profile, user, refreshProfile } = useAuth();
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -49,10 +49,11 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ setPage }) => {
 
             setMessage({ type: 'success', text: 'Perfil atualizado com sucesso!' });
 
-            // Recarregar a página após 1 segundo para atualizar o contexto
-            setTimeout(() => {
-                window.location.reload();
-            }, 1000);
+            // Aguardar um momento para garantir que a atualização foi propagada
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Atualizar o perfil no contexto sem recarregar a página
+            await refreshProfile();
         } catch (error) {
             console.error('Erro ao atualizar perfil:', error);
             setMessage({ type: 'error', text: 'Erro ao atualizar perfil' });

@@ -193,17 +193,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const signOut = async () => {
         try {
             console.log('🚪 [Auth] Iniciando logout...');
-
             // Limpa estado imediatamente (não espera Supabase)
             setUser(null);
             setProfile(null);
-
-            // Limpa localStorage primeiro
-            localStorage.clear();
-            sessionStorage.clear();
-
-            console.log('🧹 [Auth] Estado e storage limpos');
-
             // Tenta fazer logout no Supabase (com timeout)
             const logoutPromise = supabase.auth.signOut();
             const timeoutPromise = new Promise((resolve) =>
@@ -212,29 +204,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     resolve(null);
                 }, 2000)
             );
-
             await Promise.race([logoutPromise, timeoutPromise]);
-
             console.log('✅ [Auth] Logout concluído');
-
-            // Força reload da página para limpar qualquer estado residual
-            window.location.reload();
-
         } catch (error) {
             console.error('❌ [Auth] Erro ao fazer logout (ignorando):', error);
-            // Mesmo com erro, limpa tudo e recarrega
             setUser(null);
             setProfile(null);
-            localStorage.clear();
-            sessionStorage.clear();
-            window.location.reload();
         }
     };
 
     const refreshProfile = async () => {
         if (user?.id) {
-            console.log('Atualizando perfil manualmente...');
-            await fetchProfile(user.id, true); // Força refresh
+            console.log('🔄 Atualizando perfil manualmente...');
+            const success = await fetchProfile(user.id, true); // Força refresh
+            if (success) {
+                console.log('✅ Perfil atualizado com sucesso no contexto');
+            } else {
+                console.log('❌ Falha ao atualizar perfil no contexto');
+            }
         }
     };
 

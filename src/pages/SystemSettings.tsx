@@ -377,12 +377,12 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = ({ setPage 
                             <label className="block text-sm font-medium text-gray-700 mb-1">
                                 Cor Primária
                             </label>
-                            <div className="flex gap-3 items-center">
+                            <div className="flex items-center gap-4">
                                 <div
-                                    className="h-10 w-20 rounded border border-gray-300 flex-shrink-0"
-                                    style={{ backgroundColor: primaryColor } as React.CSSProperties}
+                                    className="h-10 w-20 rounded border border-gray-300 flex-shrink-0 primary-color-preview"
+                                    style={{ ['--primary-color' as string]: primaryColor } as React.CSSProperties}
                                     aria-label="Preview da cor primária"
-                                />
+                                ></div>
                                 <Input
                                     id="color_hex"
                                     label=""
@@ -408,6 +408,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = ({ setPage 
                     </div>
                 </div>
             </div>
+
         </div>
     );
 };

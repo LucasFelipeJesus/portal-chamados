@@ -138,9 +138,14 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage, onOpenCom
             setEquipments(data || []);
             setCurrentStep('equipment-selection');
             console.log('✅ Equipamentos carregados:', data?.length);
-        } catch (error: any) {
-            console.error('❌ Erro ao carregar equipamentos:', error);
-            alert(`Erro ao carregar equipamentos: ${error.message}`);
+        } catch (error: unknown) {
+            if (error instanceof Error) {
+                console.error('❌ Erro ao carregar equipamentos:', error);
+                alert(`Erro ao carregar equipamentos: ${error.message}`);
+            } else {
+                console.error('❌ Erro ao carregar equipamentos:', error);
+                alert('Erro ao carregar equipamentos: erro desconhecido');
+            }
         } finally {
             setEquipmentsLoading(false);
         }
@@ -181,11 +186,34 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage, onOpenCom
 
         const cleanCNPJ = cnpj.replace(/\D/g, '');
         console.log('🔍 Buscando CNPJ:', cleanCNPJ);
+        console.log('👤 Perfil do usuário:', { role: profile?.role, company_id: profile?.company_id });
 
-        // Busca TODAS as empresas (porque CNPJs podem estar formatados de formas diferentes no banco)
-        const { data: allCompanies, error } = await supabase
-            .from('companies')
-            .select('*');
+        let query = supabase.from('companies').select('*');
+
+        // Para clientes: filtrar apenas empresas vinculadas
+        if (profile?.role === 'cliente') {
+            if (profile.company_id) {
+                // Se tem empresa principal, incluir ela
+                query = query.or(`id.eq.${profile.company_id}`);
+            }
+
+            if (profile.additional_company_ids && profile.additional_company_ids.length > 0) {
+                // Se tem empresas adicionais, incluir elas também
+                const additionalIds = profile.additional_company_ids.join(',');
+                if (profile.company_id) {
+                    query = query.or(`id.eq.${profile.company_id},id.in.(${additionalIds})`);
+                } else {
+                    query = query.or(`id.in.(${additionalIds})`);
+                }
+            }
+
+            console.log('🔒 Cliente - Buscando apenas empresas vinculadas');
+        } else {
+            // Técnicos e admins podem ver todas as empresas
+            console.log('🔓 Técnico/Admin - Buscando todas as empresas');
+        }
+
+        const { data: allCompanies, error } = await query;
 
         setCNPJLoading(false);
 
@@ -450,7 +478,7 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage, onOpenCom
                     clientPhone: profile.phone,
                     companyName: selectedCompany.name,
                     equipmentInfo: equipmentInfo,
-                    serialNumber: formData.serial_number,
+                    serialNumber: selectedEquipment?.serial_number,
                     problemDescription: formData.problem_description,
                     contactName: formData.contact_name,
                     contactEmail: formData.contact_email,
