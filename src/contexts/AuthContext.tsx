@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect } from 'react';
+import React, { createContext, useState, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
 import type { UserProfile, AuthContextType } from '../types';
@@ -12,6 +12,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const [authError, setAuthError] = useState<string | null>(null);
+    // Ref para armazenar o userId atual e evitar closures com valor stale
+    const currentUserIdRef = useRef<string | null>(null);
 
     useEffect(() => {
         // Busca a sessão inicial
@@ -30,6 +32,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 }
 
                 setUser(session?.user ?? null);
+                currentUserIdRef.current = session?.user?.id ?? null;
 
                 if (session?.user) {
                     const profileLoaded = await fetchProfile(session.user.id);
@@ -81,7 +84,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 // Eventos de login - MAS APENAS SE O USUÁRIO MUDOU
                 if (event === 'SIGNED_IN') {
                     const newUserId = session?.user?.id;
-                    const currentUserId = user?.id;
+                    const currentUserId = currentUserIdRef.current;
 
                     // Se é o mesmo usuário, ignorar para evitar loop
                     if (newUserId === currentUserId) {
@@ -90,7 +93,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     }
 
                     console.log('✅ SIGNED_IN - novo login detectado, carregando perfil');
+                    // Atualiza o user e o ref de id imediatamente
                     setUser(session?.user ?? null);
+                    currentUserIdRef.current = session?.user?.id ?? null;
+
                     if (session?.user) {
                         await fetchProfile(session.user.id);
                     } else {
@@ -204,6 +210,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             console.log('🚪 [Auth] Iniciando logout...');
             // Limpa estado imediatamente (não espera Supabase)
             setUser(null);
+            currentUserIdRef.current = null;
             setProfile(null);
             setAuthError(null);
             // Tenta fazer logout no Supabase (com timeout)
@@ -219,6 +226,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } catch (error) {
             console.error('❌ [Auth] Erro ao fazer logout (ignorando):', error);
             setUser(null);
+            currentUserIdRef.current = null;
             setProfile(null);
         }
     };
