@@ -9,6 +9,7 @@ import { Input } from '../components/ui/Input';
 import { Textarea } from '../components/ui/Textarea';
 import { Select } from '../components/ui/Select';
 import { Button } from '../components/ui/Button';
+import EquipmentModal from '../components/EquipmentModal';
 import { FormSection } from '../components/FormSection';
 
 interface NewTicketPageProps {
@@ -41,17 +42,6 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage, onOpenCom
     const [equipments, setEquipments] = useState<Equipment[]>([]);
     const [equipmentsLoading, setEquipmentsLoading] = useState(false);
     const [showNewEquipmentForm, setShowNewEquipmentForm] = useState(false);
-    const [newEquipment, setNewEquipment] = useState({
-        manufacturer: '',
-        model: '',
-        serial_number: '',
-        installation_location: '',
-        internal_location: '',
-        application_type: '' as 'Acesso' | 'Ponto' | '',
-        tecnology: '',
-        cep: ''
-    });
-    const [equipmentCepLoading, setEquipmentCepLoading] = useState(false);
 
     // Estado do formulário de chamado (Etapa 3)
     const [formData, setFormData] = useState<TicketFormData>({
@@ -90,17 +80,7 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage, onOpenCom
         setEquipments([]);
         setEquipmentsLoading(false);
         setShowNewEquipmentForm(false);
-        setNewEquipment({
-            manufacturer: '',
-            model: '',
-            serial_number: '',
-            installation_location: '',
-            internal_location: '',
-            application_type: '',
-            tecnology: '',
-            cep: ''
-        });
-        setEquipmentCepLoading(false);
+        // newEquipment state removed; modal handles its own state now
         setFormData({
             manufacturer: '',
             model: '',
@@ -314,57 +294,6 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage, onOpenCom
         setCurrentStep('ticket-form');
     };
 
-    const handleNewEquipmentChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-        const { name, value } = e.target;
-        setNewEquipment(prev => ({ ...prev, [name]: value }));
-    };
-
-    const handleCreateEquipment = async () => {
-        if (!newEquipment.manufacturer || !newEquipment.model) {
-            setError('Fabricante e Modelo são obrigatórios.');
-            return;
-        }
-
-        if (!selectedCompany) return;
-
-        setEquipmentsLoading(true);
-        const { data, error: insertError } = await supabase
-            .from('equipments')
-            .insert([{
-                company_id: selectedCompany.id,
-                manufacturer: newEquipment.manufacturer,
-                model: newEquipment.model,
-                serial_number: newEquipment.serial_number || null,
-                internal_location: newEquipment.internal_location || newEquipment.installation_location || null,
-                application_type: newEquipment.application_type || null,
-                tecnology: newEquipment.tecnology || null
-            }])
-            .select()
-            .single();
-
-        setEquipmentsLoading(false);
-
-        if (insertError) {
-            setError(`Erro ao cadastrar equipamento: ${insertError.message}`);
-            return;
-        }
-
-        // Adiciona o novo equipamento à lista e seleciona
-        const newEquipmentData = data as Equipment;
-        setEquipments(prev => [newEquipmentData, ...prev]);
-        setSelectedEquipment(newEquipmentData);
-        setShowNewEquipmentForm(false);
-
-        setFormData(prev => ({
-            ...prev,
-            manufacturer: newEquipmentData.manufacturer,
-            model: newEquipmentData.model,
-            internal_location: newEquipmentData.internal_location || '',
-            company_cnpj: cnpj
-        }));
-
-        setCurrentStep('ticket-form');
-    };
 
     // ==================== ETAPA 3: FORMULÁRIO DE CHAMADO ====================
 
@@ -412,40 +341,7 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage, onOpenCom
         }
     };
 
-    const handleEquipmentCepSearch = async () => {
-        const cep = newEquipment.cep.replace(/\D/g, '');
-
-        if (cep.length !== 8) {
-            setError("CEP inválido. Deve conter 8 números.");
-            return;
-        }
-
-        setEquipmentCepLoading(true);
-        setError(null);
-
-        try {
-            const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
-            if (!response.ok) {
-                throw new Error('Erro ao buscar CEP. Verifique a rede.');
-            }
-            const data = await response.json();
-            if (data.erro) {
-                throw new Error('CEP não encontrado.');
-            }
-
-            setNewEquipment(prev => ({
-                ...prev,
-                installation_location: `${data.logradouro}, ${data.bairro}, ${data.localidade} - ${data.uf}`
-            }));
-
-        } catch (err: unknown) {
-            console.error("Erro ao buscar CEP:", err);
-            setError(err instanceof Error ? err.message : "Não foi possível buscar o CEP.");
-            setNewEquipment(prev => ({ ...prev, installation_location: '' }));
-        } finally {
-            setEquipmentCepLoading(false);
-        }
-    };
+    
 
     const validateForm = (): boolean => {
         if (!formData.manufacturer || !formData.model) {
@@ -844,176 +740,25 @@ export const NewTicketPage: React.FC<NewTicketPageProps> = ({ setPage, onOpenCom
                                 Cadastrar Novo Equipamento
                             </Button>
                         ) : (
-                            <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
-                                <h4 className="font-semibold text-gray-900 mb-4">Novo Equipamento</h4>
-                                <div className="space-y-3">
-                                    <Input
-                                        id="manufacturer"
-                                        name="manufacturer"
-                                        label="Fabricante *"
-                                        value={newEquipment.manufacturer}
-                                        onChange={handleNewEquipmentChange}
-                                        required
-                                    />
-                                    <Input
-                                        id="model"
-                                        name="model"
-                                        label="Modelo *"
-                                        value={newEquipment.model}
-                                        onChange={handleNewEquipmentChange}
-                                        required
-                                    />
-                                    <Input
-                                        id="serial_number"
-                                        name="serial_number"
-                                        label="Número de Série"
-                                        value={newEquipment.serial_number}
-                                        onChange={handleNewEquipmentChange}
-                                    />
-                                    <Select
-                                        id="application_type"
-                                        name="application_type"
-                                        label="Tipo de Aplicação"
-                                        value={newEquipment.application_type}
-                                        onChange={handleNewEquipmentChange}
-                                    >
-                                        <option value="">Selecione...</option>
-                                        <option value="Acesso">Acesso</option>
-                                        <option value="Ponto">Ponto</option>
-                                    </Select>
-                                    <Select
-                                        id="tecnology"
-                                        name="tecnology"
-                                        label="Tecnologia"
-                                        value={newEquipment.tecnology}
-                                        onChange={handleNewEquipmentChange}
-                                    >
-                                        <option value="">Selecione...</option>
-                                        <option value="Proximidade RFID">Proximidade RFID</option>
-                                        <option value="Biometria finger detection">Biometria finger detection</option>
-                                        <option value="Smartcard">Smartcard</option>
-                                        <option value="Facial">Facial</option>
-                                    </Select>
-                                    <Input
-                                        id="internal_location"
-                                        name="internal_location"
-                                        label="Local Interno"
-                                        placeholder="Ex: Portaria Principal, Recepção"
-                                        value={newEquipment.internal_location}
-                                        onChange={handleNewEquipmentChange}
-                                    />
-
-                                    {/* Busca de CEP */}
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            CEP do Endereço de Instalação
-                                        </label>
-                                        <div className="flex space-x-2">
-                                            <Input
-                                                id="equipment_cep"
-                                                name="cep"
-                                                label=""
-                                                placeholder="00000-000"
-                                                value={newEquipment.cep}
-                                                onChange={handleNewEquipmentChange}
-                                                className="flex-1"
-                                            />
-                                            <Button
-                                                type="button"
-                                                onClick={handleEquipmentCepSearch}
-                                                isLoading={equipmentCepLoading}
-                                                variant="secondary"
-                                                className="whitespace-nowrap"
-                                            >
-                                                <Search className="h-4 w-4 mr-1" />
-                                                Buscar
-                                            </Button>
-                                        </div>
-                                    </div>
-
-                                    <Textarea
-                                        id="installation_location"
-                                        name="installation_location"
-                                        label="Endereço de Instalação"
-                                        placeholder="Endereço completo onde o equipamento está instalado"
-                                        value={newEquipment.installation_location}
-                                        onChange={handleNewEquipmentChange}
-                                        rows={3}
-                                    />
-
-                                    {error && (
-                                        <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
-                                            {error}
-                                        </div>
-                                    )}
-
-                                    <div className="flex gap-3 pt-4">
-                                        {/* Botão Cadastrar e Continuar */}
-                                        <button
-                                            type="button"
-                                            onClick={handleCreateEquipment}
-                                            disabled={equipmentsLoading}
-                                            className={`
-                                                relative flex-1 inline-flex items-center justify-center px-6 py-3.5 
-                                                font-semibold text-white rounded-lg overflow-hidden
-                                                transition-all duration-300 ease-out
-                                                ${equipmentsLoading
-                                                    ? 'bg-gray-400 cursor-not-allowed'
-                                                    : 'bg-gradient-to-r from-blue-500 via-blue-600 to-indigo-600 hover:from-blue-600 hover:via-blue-700 hover:to-indigo-700 shadow-lg hover:shadow-xl hover:scale-105 active:scale-95'
-                                                }
-                                            `}
-                                        >
-                                            {/* Efeito de brilho animado */}
-                                            {!equipmentsLoading && (
-                                                <span className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white to-transparent opacity-20 animate-shimmer"></span>
-                                            )}
-
-                                            {/* Conteúdo do botão */}
-                                            <span className="relative flex items-center gap-2">
-                                                {equipmentsLoading ? (
-                                                    <>
-                                                        <Loader2 className="h-5 w-5 animate-spin" />
-                                                        <span>Cadastrando...</span>
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <CheckCircle className="h-5 w-5" />
-                                                        <span>Cadastrar e Continuar</span>
-                                                    </>
-                                                )}
-                                            </span>
-                                        </button>
-
-                                        {/* Botão Cancelar */}
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setShowNewEquipmentForm(false);
-                                                setError(null);
-                                            }}
-                                            className="
-                                                px-6 py-3.5 font-semibold text-gray-700 bg-white border-2 border-gray-300 
-                                                rounded-lg hover:bg-gray-50 hover:border-gray-400 hover:shadow-md
-                                                transition-all duration-200 ease-out
-                                                active:scale-95
-                                            "
-                                        >
-                                            Cancelar
-                                        </button>
-                                    </div>
-
-                                    {/* Estilos customizados para animação de brilho */}
-                                    <style>{`
-                                        @keyframes shimmer {
-                                            0% { transform: translateX(-100%); }
-                                            100% { transform: translateX(100%); }
-                                        }
-                                        .animate-shimmer {
-                                            animation: shimmer 2.5s infinite;
-                                        }
-                                    `}</style>
-                                </div>
-                            </div>
+                            <EquipmentModal
+                                isOpen={showNewEquipmentForm}
+                                onClose={() => { setShowNewEquipmentForm(false); setError(null); }}
+                                companies={selectedCompany ? [selectedCompany] : companies}
+                                onSaved={(equipment) => {
+                                    // Adiciona o novo equipamento à lista local e seleciona
+                                    setEquipments(prev => [equipment, ...prev]);
+                                    setSelectedEquipment(equipment);
+                                    setFormData(prev => ({
+                                        ...prev,
+                                        manufacturer: equipment.manufacturer,
+                                        model: equipment.model,
+                                        internal_location: equipment.internal_location || '',
+                                        company_cnpj: cnpj
+                                    }));
+                                    setShowNewEquipmentForm(false);
+                                    setCurrentStep('ticket-form');
+                                }}
+                            />
                         )}
                     </div>
                 )}
