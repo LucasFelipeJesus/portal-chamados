@@ -231,7 +231,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 // Redireciona para tela de login (root). Em SPA isso também forçará
                 // a exibição do `LoginPage` caso o App baseie-se em `user`.
                 if (typeof window !== 'undefined') {
-                    window.location.href = '/';
+                    // Use Vite's BASE_URL so redirect works both in dev ("/")
+                    // and when deployed under a subpath (e.g. "/portal-chamados/").
+                    // `import.meta.env.BASE_URL` is set from `vite.config.ts` `base` option.
+                    // Fallback to '/' if not available.
+                    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+                    // @ts-ignore - import.meta.env typing can vary across setups
+                    const base = (import.meta as any)?.env?.BASE_URL || '/';
+                    window.location.href = base;
                 }
             } catch (err) {
                 // Não falhar o logout por erro de navegação
