@@ -1,6 +1,6 @@
 {
   "name": "meu-projeto-chamados",
-  "homepage": "https://LucasFelipeJesus.github.io/portal-chamados",
+  "homepage": "https://github.com/LucasFelipeJesus/portal-chamados",
   "private": true,
   "version": "0.1.5",
   "type": "module",
@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
+    "deploy": "gh-pages -d dist -r https://github.com/LucasFelipeJesus/portal-chamados.git"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.80.0",
