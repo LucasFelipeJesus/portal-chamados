@@ -7,6 +7,7 @@ import { Input } from '../components/ui/Input';
 
 export const FirstPasswordChangePage: React.FC = () => {
     const { profile, user, refreshProfile } = useAuth();
+    const [redirecting, setRedirecting] = useState(false);
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [showNewPassword, setShowNewPassword] = useState(false);
@@ -105,11 +106,12 @@ export const FirstPasswordChangePage: React.FC = () => {
             // Se ainda tiver force_password_change = true, algo está errado
             if (profile?.force_password_change === true) {
                 console.error('⚠️ AVISO: Perfil ainda mostra force_password_change=true após atualização!');
-                console.error('🔄 Tentando recarregar a página como fallback...');
-                await new Promise(resolve => setTimeout(resolve, 500));
-                window.location.reload();
+                setError('Não foi possível atualizar a senha. Tente novamente ou contate o suporte.');
             } else {
-                console.log('🎉 Sucesso! A tela deve mudar para o dashboard agora.');
+                console.log('🎉 Sucesso! Redirecionando para o dashboard...');
+                setRedirecting(true);
+                // Redireciona para o dashboard (ajuste a rota conforme necessário)
+                window.location.href = '/';
             }
         } catch (err) {
             console.error('Erro ao alterar senha:', err);
@@ -121,6 +123,11 @@ export const FirstPasswordChangePage: React.FC = () => {
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center p-4">
+            {redirecting && (
+                <div className="fixed inset-0 flex items-center justify-center bg-white bg-opacity-80 z-50">
+                    <div className="text-lg font-semibold text-blue-700">Redirecionando...</div>
+                </div>
+            )}
             <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-8">
                 {/* Ícone de alerta */}
                 <div className="flex justify-center mb-4">
